@@ -83,6 +83,18 @@ Compare against the original mapping:
 python -m dancer song.mp3 --cli --yes --planner legacy
 ```
 
+## Six-axis GUI
+
+Launch the dedicated six-axis GUI with a media file:
+
+```bash
+python -m dancer scene.mp4 --multiaxis
+```
+
+It provides a six-channel preview, `balanced/rhythm/expressive` preset selection, secondary-axis strength control, subdivision selection, optional L0 automap, refresh, and one-click bundle export.
+
+The original GUI remains the default when `--multiaxis` is omitted.
+
 ## Six-axis / SR6 output
 
 Generate a standard six-file funscript bundle:
@@ -204,4 +216,4 @@ Single-axis `.funscript` output remains unchanged (`at` in milliseconds, `pos` i
 
 Six-axis output is emitted as separate standard funscript files so existing multi-axis players can load each channel independently. A `.motion.json` manifest is written for inspection and tooling; disable it with `--no_manifest`.
 
-The current Tk GUI still previews/exports the single-axis path. Six-axis generation is available through the CLI and Python API.
+Six-axis generation is available through the dedicated Tk GUI, CLI, and Python API. The original single-axis GUI remains available unchanged for the legacy workflow.

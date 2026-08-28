@@ -10,6 +10,11 @@ def main():
         from .cli import cmd
         return cmd(args)
 
+    if args.multiaxis:
+        from .multiaxis_ui import ux
+        ux(args)
+        return 0
+
     from .ui import ux
     ux(args)
     return 0
