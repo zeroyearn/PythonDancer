@@ -33,13 +33,13 @@ def ffmpeg_conv(in_file, out_file):
 def cli_args():
     parser = argparse.ArgumentParser(
         prog="python-dancer",
-        description="Create funscripts from audio using beat-aligned motion planning",
+        description="Create single- or six-axis funscripts from audio using beat-aligned motion planning",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument("audio_path", nargs="?", default=None, help="Path to input media")
-    parser.add_argument("--out_path", help="Path to export funscript")
-    parser.add_argument("--csv", help="Export as CSV instead of funscript", action="store_true")
+    parser.add_argument("--out_path", help="Path to export funscript or multi-axis bundle prefix")
+    parser.add_argument("--csv", help="Export as CSV instead of funscript (single-axis only)", action="store_true")
     parser.add_argument("-m", "--heatmap", help="Export a speed heatmap", action="store_true")
     parser.add_argument("-c", "--convert", help="Convert input media to mono WAV with ffmpeg first", action="store_true")
     parser.add_argument("-a", "--automap", help="Automatically select pitch range and energy", action="store_true")
@@ -47,11 +47,16 @@ def cli_args():
     parser.add_argument("--no_plp", help="Disable PLP beat estimation", action="store_true")
     parser.add_argument("--cli", help="Use command line mode instead of GUI", action="store_true")
 
-    parser.add_argument("--planner", choices=("adaptive", "legacy"), default="adaptive", help="Motion planner")
+    parser.add_argument("--planner", choices=("adaptive", "legacy"), default="adaptive", help="Primary L0 motion planner")
     parser.add_argument("--subdivision", type=int, choices=(0, 1, 2, 4), default=0, help="Strokes per beat; 0 selects automatically")
-    parser.add_argument("--max_speed", type=float, default=400.0, help="Maximum position units per second; <=0 disables")
-    parser.add_argument("--max_acceleration", type=float, default=2400.0, help="Maximum position units/s^2; <=0 disables")
+    parser.add_argument("--max_speed", type=float, default=400.0, help="Maximum L0 position units per second; <=0 disables")
+    parser.add_argument("--max_acceleration", type=float, default=2400.0, help="Maximum L0 position units/s^2; <=0 disables")
     parser.add_argument("--min_interval", type=float, default=0.02, help="Minimum seconds between emitted actions")
+
+    parser.add_argument("--multiaxis", action="store_true", help="Generate an SR6/OSR6-style L0/L1/L2/R0/R1/R2 funscript bundle")
+    parser.add_argument("--multiaxis_preset", choices=("balanced", "rhythm", "expressive"), default="balanced", help="Secondary-axis motion character")
+    parser.add_argument("--axis_strength", type=float, default=1.0, metavar="[0+]", help="Global amplitude multiplier for L1/L2/R0/R1/R2")
+    parser.add_argument("--no_manifest", action="store_true", help="Do not write the .motion.json bundle manifest")
 
     parser.add_argument("--auto_pitch", type=float, default=50.0, metavar="[0-100]", help="Target average position")
     parser.add_argument("--auto_speed", type=float, default=250.0, metavar="[0+]", help="Target action speed in units/s")
