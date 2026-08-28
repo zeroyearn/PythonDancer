@@ -1,269 +1,346 @@
-import librosa
-import numpy as np
+"""Backward-compatible public API for PythonDancer's analysis and motion engine."""
+from __future__ import annotations
+
 from json import dump
-from scipy.optimize import minimize
+from pathlib import Path
+import subprocess
+
 import matplotlib as mpl
+import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
-from audioread import audio_open
+from scipy.optimize import minimize_scalar
 
-VERSION="?"
-HEATMAP = LinearSegmentedColormap.from_list("intensity",["w", "g", "orange", "r"], N=256)
+from .features import extract_audio_features, safe_normalize
+from .motion import MotionConfig, plan_motion
 
-#TODO: Fix action lag that happens sometimes, maybe change hop?
-def load_audio_data(audio_file, hop_length=1024, frame_length=1024, plp=True):
-	y, sr=None,None
-	with audio_open(audio_file) as f:
-		y, sr = librosa.load(f, sr=None, mono=True)
+VERSION = "2.0.0"
+HEATMAP = LinearSegmentedColormap.from_list(
+    "intensity", ["white", "green", "orange", "red"], N=256
+)
 
-	# Compute beats
-	onset = None
-	if (plp):
-		pulse = librosa.beat.plp(y=y, sr=sr, hop_length=hop_length)
-		onset = pulse.T
 
-	_, beats = librosa.beat.beat_track(y=y, sr=sr, onset_envelope=onset, hop_length=hop_length, trim=False, units="time")
+def load_audio_data(audio_file: str | Path, hop_length: int = 512, frame_length: int = 2048, plp: bool = True):
+    import librosa
 
-	# Compute energy (RMS)
-	rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
-	frames = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
+    try:
+        y, sr = librosa.load(str(audio_file), sr=None, mono=True)
+    except Exception:
+        try:
+            raw = subprocess.check_output([
+                "ffmpeg", "-v", "error", "-i", str(audio_file),
+                "-map", "0:a:0", "-f", "f32le", "-ac", "1", "-ar", "48000", "pipe:1",
+            ])
+            y = np.frombuffer(raw, dtype="<f4").astype(np.float32, copy=False)
+            sr = 48000
+        except Exception as exc:
+            raise ValueError(f"Unable to decode audio from {audio_file}") from exc
+        if y.size == 0:
+            raise ValueError(f"Input contains no audio stream: {audio_file}")
 
-	# Compute pitch
-	pitches, magnitudes = librosa.piptrack(y=y, sr=sr, hop_length=hop_length, center=True)
+    return extract_audio_features(
+        y,
+        int(sr),
+        hop_length=hop_length,
+        frame_length=frame_length,
+        plp=plp,
+    )
 
-	pitches = np.fmax(0.01, pitches)
-	magnitudes = np.fmax(0.01, magnitudes)
-	#TODO: The fuck does this do
-	pitches = np.sum(pitches * magnitudes, axis=0) / np.sum(magnitudes, axis=0)
-
-	#Funny segment thing
-	last = 0
-	splits = [0]
-	for k,v in enumerate(frames):
-		if last >= len(beats):
-			break
-		if v > beats[last]:
-			if (last > 0):
-				#splits.append(int((k + splits[-1]) / 2))
-				splits.append(k)
-			last += 1
-	splits.append(-1)
-
-	frms = [np.sum(rms[splits[i-1]:splits[i]]) for i in range(len(beats))]
-	fpitch = [np.sum(pitches[splits[i-1]:splits[i]]) for i in range(len(beats))]
-
-	#Fix divide by zero
-	fpitch = np.fmax(0.01, fpitch)
-	frms = np.fmax(0.01, frms)
-
-	return {
-		"at": librosa.get_duration(y=y, sr=sr, hop_length=hop_length),
-		"beats": beats,
-		"pitch": np.log10(fpitch),
-		"energy": frms
-	}
 
 def normalize(data):
-	fmin, fmax = np.min(data), np.max(data)
-	return np.array([(value-fmin)/(fmax-fmin) for value in data])
+    return safe_normalize(data)
+
 
 def default_peak(pos, at, last_pos, last_at):
-	return [(at, min(max(0,pos),100))]
+    return [(at, min(max(0.0, float(pos)), 100.0))]
+
 
 def int_at(pos, at, last_pos, last_at, limit):
-	before_ratio = abs(last_pos - limit)
-	after_ratio = abs(pos - limit)
+    before_ratio = abs(last_pos - limit)
+    after_ratio = abs(pos - limit)
+    denominator = after_ratio + before_ratio
+    if denominator <= 1e-9:
+        return float(at)
+    return (before_ratio * at + after_ratio * last_at) / denominator
 
-	return (before_ratio * at + after_ratio * last_at) / (after_ratio + before_ratio)
 
 def create_peak_bounce(pos, at, last_pos, last_at):
-	actions = []
-	action = lambda pos,at: actions.append(default_peak(pos,at,0,0)[0])
+    actions = []
+    action = lambda p, t: actions.append(default_peak(p, t, 0, 0)[0])
 
-	if last_pos < 0:
-		tmp_at = int_at(pos, at, last_pos, last_at, 0)
-		action(0, tmp_at)
-	elif last_pos > 100:
-		tmp_at = int_at(pos, at, last_pos, last_at, 100)
-		action(100, tmp_at)
+    if last_pos < 0:
+        action(0, int_at(pos, at, last_pos, last_at, 0))
+    elif last_pos > 100:
+        action(100, int_at(pos, at, last_pos, last_at, 100))
 
-	if pos > 100:
-		tmp_at = int_at(pos, at, last_pos, last_at, 100)
-		action(100, tmp_at)
-		action(200 - pos, at)
-	elif pos < 0:
-		tmp_at = int_at(pos, at, last_pos, last_at, 0)
-		action(0, tmp_at)
-		action(-pos, at)
-	else:
-		action(pos, at)
-	
-	return actions
+    if pos > 100:
+        action(100, int_at(pos, at, last_pos, last_at, 100))
+        action(200 - pos, at)
+    elif pos < 0:
+        action(0, int_at(pos, at, last_pos, last_at, 0))
+        action(-pos, at)
+    else:
+        action(pos, at)
+    return actions
+
 
 def create_peak_fold(pos, at, last_pos, last_at):
-	actions = []
-	action = lambda pos,at: actions.append(default_peak(pos,at,0,0)[0])
+    actions = []
+    action = lambda p, t: actions.append(default_peak(p, t, 0, 0)[0])
+    int_att = (last_at + at) / 2
+    travel = abs(last_pos - pos) / 2
+    if last_pos < 0:
+        action(last_pos + travel, int_att)
+    elif last_pos > 100:
+        action(last_pos - travel, int_att)
 
-	int_att = (last_at + at) / 2
-	travel = abs(last_pos - pos) / 2
-	if last_pos < 0:
-		action(last_pos + travel, int_att)
-	elif last_pos > 100:
-		action(last_pos - travel, int_att)
+    if pos < 0:
+        action(last_pos - travel, int_att)
+        action(last_pos, at)
+    elif pos > 100:
+        action(last_pos + travel, int_att)
+        action(last_pos, at)
+    else:
+        action(pos, at)
+    return actions
 
-	if pos < 0:
-		action(last_pos - travel, int_att)
-		action(last_pos, at)
-	elif pos > 100:
-		action(last_pos + travel, int_att)
-		action(last_pos, at)
-	else:
-		action(pos, at)
-	
-	return actions
 
 peaks = [default_peak, create_peak_bounce, create_peak_fold]
 
+
 def create_actions_barrier(data, start_time=0, overflow=0):
-	last_at = start_time
-	last_pos = 50
+    last_at = float(start_time)
+    last_pos = 50.0
+    actions = []
+    for unoffset_pos, at, offset in zip(data["energy_to_pos"], data["beats"], data["offsets"]):
+        at = float(at)
+        intermediate_at = (at + last_at) / 2
+        pos = float(unoffset_pos + offset)
+        actions += peaks[int(overflow)](pos, intermediate_at, last_pos, last_at)
+        last_at = intermediate_at
+        last_pos = pos
 
-	actions = []
-	for unoffset_pos, at, offset in zip(data["energy_to_pos"], data["beats"], data["offsets"]):
-		# up
-		intermediate_at = (at + last_at) / 2
-		pos = unoffset_pos + offset
-		actions += peaks[int(overflow)](pos, intermediate_at, last_pos, last_at)
-		last_at = intermediate_at
-		last_pos = pos
+        pos = float((unoffset_pos * -1) + offset)
+        actions += peaks[int(overflow)](pos, at, last_pos, last_at)
+        last_at = at
+        last_pos = pos
+    return actions
 
-		# down
-		pos = (unoffset_pos * -1) + offset
-		actions += peaks[int(overflow)](pos, at, last_pos, last_at)
-		last_at = at
-		last_pos = pos
 
-	return actions
+def _legacy_create_actions(data, energy_multiplier=1, pitch_range=100, overflow=0, amplitude_centering=0, center_offset=0):
+    processed_data = data.copy()
+    normalized_pitch = safe_normalize(processed_data.get("pitch", []))
+    normalized_energy = safe_normalize(processed_data.get("energy", []))
+    length = min(len(normalized_energy), len(np.asarray(processed_data.get("beats", []))))
+    if length == 0:
+        return []
 
-def create_actions(data, energy_multiplier=1, pitch_range=100, overflow=0, amplitude_centering=0, center_offset=0):
-	processed_data = data.copy()
-	
-	normalized_pitch = normalize(processed_data["pitch"])
-	normalized_energy = normalize(processed_data["energy"])
-	
-	pitch_bias = (100 - pitch_range) / 2
-	
-	length = len(normalized_energy)
-	
-	processed_data["offsets"] = (
-		normalized_pitch[:length] * pitch_range + 
-		pitch_bias + 
-		amplitude_centering * normalized_energy + 
-		center_offset
-	)
-	
-	processed_data["energy_to_pos"] = normalized_energy * energy_multiplier * 50
-	
-	return create_actions_barrier(processed_data, overflow=overflow)
+    pitch_bias = (100 - pitch_range) / 2
+    processed_data["beats"] = np.asarray(processed_data["beats"])[:length]
+    processed_data["offsets"] = (
+        normalized_pitch[:length] * pitch_range
+        + pitch_bias
+        + amplitude_centering * normalized_energy[:length]
+        + center_offset
+    )
+    processed_data["energy_to_pos"] = normalized_energy[:length] * energy_multiplier * 50
+    return create_actions_barrier(processed_data, overflow=overflow)
+
+
+def create_actions(
+    data,
+    energy_multiplier=1,
+    pitch_range=100,
+    overflow=0,
+    amplitude_centering=0,
+    center_offset=0,
+    *,
+    planner="adaptive",
+    subdivision=0,
+    max_speed=400,
+    max_acceleration=2400,
+    min_interval=0.02,
+):
+    if planner == "legacy":
+        return _legacy_create_actions(
+            data,
+            energy_multiplier=energy_multiplier,
+            pitch_range=pitch_range,
+            overflow=overflow,
+            amplitude_centering=amplitude_centering,
+            center_offset=center_offset,
+        )
+    if planner != "adaptive":
+        raise ValueError("planner must be 'adaptive' or 'legacy'")
+
+    config = MotionConfig(
+        energy_multiplier=float(energy_multiplier),
+        pitch_range=float(pitch_range),
+        overflow=int(overflow),
+        amplitude_centering=float(amplitude_centering),
+        center_offset=float(center_offset),
+        subdivision=int(subdivision),
+        max_speed=float(max_speed),
+        max_acceleration=float(max_acceleration),
+        min_interval=float(min_interval),
+    )
+    return plan_motion(data, config)
+
 
 def _speed(A, B, smax=400.0):
-	v = abs(B[1] - A[1]) / (B[0] - A[0])
-	return v / smax
-def speed(A,B, **kwargs):
-	return max(min(_speed(A,B, **kwargs),1.0),0.0)
+    dt = float(B[0]) - float(A[0])
+    if dt <= 1e-9:
+        return 0.0
+    value = abs(float(B[1]) - float(A[1])) / dt
+    return value / smax if smax > 0 else value
 
-def autoval(data, tpi=15, target_speed=300, v2above=0.6, opt=1):
-	def cmean(pitch):
-		result = create_actions(data, energy_multiplier=0, center_offset=pitch)
-		_,Y = map(list, zip(*result))
-		return np.average(Y)
 
-	def pdst(p):
-		a,b = cmean(p), tpi
-		return abs(a - b)
+def speed(A, B, **kwargs):
+    return max(min(_speed(A, B, **kwargs), 1.0), 0.0)
 
-	pres = minimize(pdst, (100,), method="Nelder-Mead", bounds=((-200,200),))
-	pres = pres.x[0]
 
-	def cemean(energy):
-		result = create_actions(data, energy_multiplier=energy, pitch_range=pres)
-		speeds = np.array([_speed(result[i],result[i+1],smax=1.0) for i in range(len(result)-1)], dtype=np.float32)
-		return abs(np.average(speeds) - target_speed)
+def _average_position(actions):
+    if not actions:
+        return 50.0
+    return float(np.mean([position for _, position in actions]))
 
-	# V2 works abit like lazy clustering
-	# I should do more clustering
-	def cemeanv2(energy):
-		result = create_actions(data, energy_multiplier=energy, pitch_range=pres)
-		speeds = np.array([_speed(result[i], result[i+1], smax=1.0) for i in range(len(result) - 1)], dtype=np.float32)
-		
-		# Counting the number of speeds above the target speed
-		above_target = np.sum(speeds > target_speed)
-		# Calculate the percentage of speeds above the target speed
-		percentage_above_target = above_target / len(speeds)
-		
-		# Ensure at least 20% of speeds are above the target speed
-		return abs(percentage_above_target - v2above) # Ensure 20% (0.2) are above the target speed
 
-	def celen(energy):
-		result = create_actions(data, energy_multiplier=energy, pitch_range=pres)
-		actual_percentage = np.mean([abs(result[i][1] - result[i+1][1])/100 for i in range(len(result) - 1)], dtype=np.float64)
-		return abs(actual_percentage - v2above)
+def _raw_speeds(actions):
+    if len(actions) < 2:
+        return np.asarray([], dtype=np.float64)
+    return np.asarray([
+        _speed(actions[i], actions[i + 1], smax=1.0)
+        for i in range(len(actions) - 1)
+    ], dtype=np.float64)
 
-	optimizers = [
-		cemean,
-		cemeanv2,
-		celen
-	]
-	eres = minimize(optimizers[opt], (10,), method="Nelder-Mead", bounds=((0,100),), options={'xatol': 1e-10, 'disp': True})
-	eres = eres.x[0]
 
-	return pres, eres
+def autoval(data, tpi=50, target_speed=250, v2above=0.65, opt=1, *, planner="adaptive"):
+    if len(np.asarray(data.get("beats", []))) == 0:
+        return 100.0, 1.0
 
-#TODO: Do better
-def render_heatmap(data, energy, pitch, oor, amplitude_centering=0, center_offset=0, w=4096, h=128):
-	result = create_actions(
-		data, 
-		energy_multiplier=energy, 
-		pitch_range = pitch,
-		overflow = oor,
-		amplitude_centering=amplitude_centering,
-		center_offset=center_offset
-	)
-	speeds = np.array([speed(result[i],result[i+1]) for i in range(len(result)-1)])
-	gradient = np.vstack([speeds]*h)
+    target_position = float(np.clip(tpi, 0, 100))
 
-	dpi = mpl.rcParams["figure.dpi"]
-	fig = Figure(figsize=(w/dpi, h/dpi), tight_layout=True)
-	plot = fig.add_subplot(111)
-	plot.imshow(gradient, cmap=HEATMAP, interpolation="lanczos")
-	plot.axis("off")
-	return fig
+    def position_error(pitch_range):
+        actions = create_actions(
+            data,
+            energy_multiplier=0.0,
+            pitch_range=pitch_range,
+            max_speed=0,
+            max_acceleration=0,
+            planner=planner,
+        )
+        return abs(_average_position(actions) - target_position)
+
+    pitch_result = minimize_scalar(position_error, bounds=(-200.0, 200.0), method="bounded")
+    pitch_range = float(pitch_result.x) if pitch_result.success else 100.0
+
+    def energy_error(energy):
+        actions = create_actions(
+            data,
+            energy_multiplier=energy,
+            pitch_range=pitch_range,
+            max_speed=0,
+            max_acceleration=0,
+            planner=planner,
+        )
+        speeds = _raw_speeds(actions)
+        if speeds.size == 0:
+            return float(target_speed)
+        if opt == 0:
+            return abs(float(np.mean(speeds)) - target_speed)
+        if opt == 1:
+            percentage = float(np.mean(speeds > target_speed))
+            return abs(percentage - float(np.clip(v2above, 0.0, 1.0)))
+        if opt == 2:
+            result = np.asarray([abs(actions[i][1] - actions[i + 1][1]) / 100.0 for i in range(len(actions) - 1)])
+            return abs(float(np.mean(result)) - float(np.clip(v2above, 0.0, 1.0)))
+        raise ValueError("opt must be 0, 1, or 2")
+
+    energy_result = minimize_scalar(energy_error, bounds=(0.0, 10.0), method="bounded")
+    energy = float(energy_result.x) if energy_result.success else 1.0
+    return pitch_range, energy
+
+
+def render_heatmap(
+    data,
+    energy,
+    pitch,
+    oor,
+    amplitude_centering=0,
+    center_offset=0,
+    w=4096,
+    h=128,
+    *,
+    planner="adaptive",
+    subdivision=0,
+    max_speed=400,
+    max_acceleration=2400,
+    min_interval=0.02,
+):
+    result = create_actions(
+        data,
+        energy_multiplier=energy,
+        pitch_range=pitch,
+        overflow=oor,
+        amplitude_centering=amplitude_centering,
+        center_offset=center_offset,
+        planner=planner,
+        subdivision=subdivision,
+        max_speed=max_speed,
+        max_acceleration=max_acceleration,
+        min_interval=min_interval,
+    )
+    speeds = np.asarray([speed(result[i], result[i + 1]) for i in range(max(0, len(result) - 1))])
+    if speeds.size == 0:
+        speeds = np.zeros(1, dtype=np.float64)
+    gradient = np.vstack([speeds] * max(1, int(h)))
+
+    dpi = mpl.rcParams["figure.dpi"]
+    width = max(1, int(w))
+    height = max(1, int(h))
+    fig = Figure(figsize=(width / dpi, height / dpi), tight_layout=True)
+    plot = fig.add_subplot(111)
+    plot.imshow(gradient, cmap=HEATMAP, interpolation="lanczos", aspect="auto")
+    plot.axis("off")
+    return fig
+
 
 def dump_csv(f, data):
-	for at, pos in data:
-		f.write(f"{at*1000},{round(pos)}\n")
+    for at, pos in data:
+        f.write(f"{int(round(float(at) * 1000))},{round(float(pos))}\n")
 
-def dump_funscript(f, data):
-	return dump({
-		"actions": [{"at": int(at*1000), "pos": round(pos)} for at,pos in data],
-		"inverted": False,
-		"metadata": {
-			"creator": "PythonDancer",
-			"description": "",
-			"duration": int(data[-1][0]),
-			"license": "None",
-			"notes": "",
-			"performers": [],
-			"script_url": "",
-			"tags": [],
-			"title": "",
-			"type": "basic",
-			"video_url": "",
-		},
-		"range": 100,
-		"version": "1.0",
-	}, f)
 
-if __name__ == "__main__":
-	data = load_audio_data("/mnt/newfiles/Video/MBad2/inter_cgi/SUPERNOVA 2 - HMV⧸PMV [COMBOBEAT] [3373395].mp4")
-	print(data)
+def dump_funscript(f, data, metadata=None):
+    actions = [
+        {"at": int(round(float(at) * 1000)), "pos": int(round(float(pos)))}
+        for at, pos in data
+        if np.isfinite(at) and np.isfinite(pos)
+    ]
+    actions.sort(key=lambda action: action["at"])
+    duration = actions[-1]["at"] if actions else 0
+    meta = {
+        "creator": "PythonDancer 2",
+        "description": "Generated from audio features",
+        "duration": duration,
+        "license": "None",
+        "notes": "",
+        "performers": [],
+        "script_url": "",
+        "tags": [],
+        "title": "",
+        "type": "basic",
+        "video_url": "",
+    }
+    if metadata:
+        meta.update(metadata)
+    return dump(
+        {
+            "actions": actions,
+            "inverted": False,
+            "metadata": meta,
+            "range": 100,
+            "version": "1.0",
+        },
+        f,
+        indent=2,
+    )

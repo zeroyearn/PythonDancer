@@ -1,44 +1,143 @@
-A port of https://github.com/ncdxncdx/FunscriptDancer to python
+# PythonDancer 2
 
-![The UI running](example.PNG)
+PythonDancer turns audio or video soundtracks into `.funscript` motion. This fork keeps the original GUI/CLI workflow but replaces the core mapping with a beat-aware motion engine.
 
-Run it now by downloading the latest release exe!
+> Upstream: `NodudeWasTaken/PythonDancer`, itself a Python port of `ncdxncdx/FunscriptDancer`.
 
-Or run it like
+## What changed in 2.0
+
+The original engine primarily mapped beat timing + RMS energy + pitch directly to a single up/down stroke per beat. V2 adds:
+
+- beat-aligned feature extraction with the original segmentation off-by-one fixed;
+- safe normalization for silent/constant/invalid feature windows;
+- onset, bass/mid/high spectral energy, harmonic and percussive features;
+- an adaptive motion planner that combines rhythmic and spectral cues;
+- automatic `1x / 2x / 4x` beat subdivision;
+- velocity, acceleration and minimum-action-interval constraints;
+- `adaptive` and `legacy` planners for A/B comparison;
+- a corrected automapper that optimizes the pitch range it actually returns;
+- robust empty/audio-less input handling;
+- fixed CLI heatmap argument wiring;
+- a real `python -m dancer` entry point;
+- modern Python packaging and regression tests.
+
+## Install
+
+Python 3.10+ is supported.
+
+```bash
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -e .
 ```
-git clone https://github.com/NodudeWasTaken/PythonDancer
-cd PythonDancer
-pip install -r requirements.txt
 
+For development/tests:
+
+```bash
+pip install -e '.[test]'
+python -m pytest
+```
+
+FFmpeg is recommended and is required for media containers that the normal audio decoder cannot read directly.
+
+## Run
+
+GUI:
+
+```bash
 python -m dancer
-python -m dancer --cli -h
 ```
 
-CLI Interface
+CLI:
+
+```bash
+python -m dancer song.mp3 --cli --yes
 ```
-> PythonDancer.exe --cli -h
-usage: libfun [-h] [--out_path OUT_PATH] [--csv] [-m] [-c] [-a] [-y] [--no_plp] [--cli] [--auto_pitch [0-100]]
-              [--auto_speed [0-400]] [--pitch [-200-200]] [--energy [0-100]] [--overflow [0-2]]
-              [audio_path]
 
-Creates funscripts from audio
+Adaptive planner with a heatmap:
 
-positional arguments:
-  audio_path            Path to input media (default: None)
-
-options:
-  -h, --help            show this help message and exit
-  --out_path OUT_PATH   Path to export funscript (default: None)
-  --csv                 Export as CSV instead of funscript (default: False)
-  -m, --heatmap         Export heatmap (default: False)
-  -c, --convert         Automatically use ffmpeg to convert input media (default: False)
-  -a, --automap         Automatically find suitable pitch and energy values (default: False)
-  -y, --yes             Overwrite funscript (default: False)
-  --no_plp              Disable PLP (default: False)
-  --cli                 Use commandline (default: False)
-  --auto_pitch [0-100]
-  --auto_speed [0-400]
-  --pitch [-200-200]
-  --energy [0-100]
-  --overflow [0-2]
+```bash
+python -m dancer video.mp4 --cli --yes --heatmap \
+  --planner adaptive \
+  --subdivision 0 \
+  --max_speed 400 \
+  --max_acceleration 2400
 ```
+
+Compare against the original mapping:
+
+```bash
+python -m dancer song.mp3 --cli --yes --planner legacy
+```
+
+## Motion model
+
+```text
+Audio
+  ├─ beat / PLP
+  ├─ onset strength
+  ├─ RMS energy
+  ├─ pitch
+  ├─ bass / mid / high energy
+  └─ harmonic / percussive energy
+            │
+            ▼
+      Beat-aligned features
+            │
+            ▼
+       Motion planner
+      ├─ intensity / range
+      ├─ center movement
+      ├─ transient accents
+      └─ auto subdivision
+            │
+            ▼
+      Constraint layer
+      ├─ range / overflow
+      ├─ max velocity
+      ├─ max acceleration
+      └─ minimum interval
+            │
+            ▼
+        .funscript / CSV
+```
+
+### Adaptive subdivision
+
+`--subdivision 0` lets the planner choose density from local rhythmic activity. You can force `1`, `2`, or `4` strokes per beat for predictable output.
+
+### Safety/physical limits
+
+The adaptive planner defaults to:
+
+- max speed: `400` position units/s;
+- max acceleration: `2400` position units/s²;
+- minimum action interval: `0.02s`.
+
+Set a speed or acceleration value to `0` or below to disable that limit.
+
+## Automap
+
+`--automap` searches for a pitch range and energy multiplier. The objectives remain compatible with the original three modes:
+
+```text
+--auto_mod 1  mean action speed
+--auto_mod 2  percentage above target speed
+--auto_mod 3  average travel length
+```
+
+Example:
+
+```bash
+python -m dancer song.wav --cli --yes --automap \
+  --auto_pitch 50 \
+  --auto_speed 250 \
+  --auto_per 65
+```
+
+## Output compatibility
+
+`.funscript` output remains the standard single-axis action format (`at` in milliseconds, `pos` in `0..100`). Existing consumers should continue to work.
+
+V2 is structured so additional device/axis planners can be layered above the shared feature engine later without coupling audio analysis to a particular actuator layout.
