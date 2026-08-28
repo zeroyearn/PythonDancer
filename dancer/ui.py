@@ -679,7 +679,7 @@ Thanks to you for using this software!""") )
 		
 	def automap(self):
 		if (self.map_var.get() and len(self.data) > 0):
-			pitch, energy = autoval(self.data, tpi=self.center_offset_slider.get(), target_speed=self.speed_spinbox_var.get(), v2above=self.per_spinbox_var.get()/100.0, opt=self.Automode())
+			pitch, energy = autoval(self.data, tpi=self.pitch_spinbox_var.get(), target_speed=self.speed_spinbox_var.get(), v2above=self.per_spinbox_var.get()/100.0, opt=self.Automode())
 			self.pitch_slider["value"] = int(pitch)
 			self.energy_slider["value"] = int(energy * 10.0)
 			

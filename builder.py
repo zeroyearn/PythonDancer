@@ -1,26 +1,25 @@
-import requests
-import sys
+"""Windows release builder used by GitHub Actions."""
+from __future__ import annotations
+
 import subprocess
-import io
-import shutil
-import os
-import zipfile
+import sys
 
 
-print("Fetching binaries...")
-os.system(f"{sys.executable} scripts/fetch_binaries.py")
+def main():
+    print("Fetching FFmpeg binary...")
+    subprocess.check_call([sys.executable, "scripts/fetch_binaries.py"])
 
-print("Download UPX")
-with requests.get("https://github.com/upx/upx/releases/download/v4.0.2/upx-4.0.2-win64.zip") as r:
-	with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-		for file in z.infolist():
-			if ("upx.exe" in file.filename):
-				with z.open(file.filename) as zf:
-					with open("upx.exe", "wb") as f:
-						shutil.copyfileobj(zf, f)
-						break
+    print("Building executable...")
+    subprocess.check_call([
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--clean",
+        "--noconfirm",
+        "qt.spec",
+    ])
+    print("Done!")
 
-print("Building")
-os.system("pyinstaller qt.spec")
 
-print("Done!")
+if __name__ == "__main__":
+    main()

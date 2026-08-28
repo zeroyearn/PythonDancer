@@ -1,61 +1,66 @@
+from __future__ import annotations
+
 import argparse
 import subprocess
 
-def ffmpeg_check():
-	try:
-		subprocess.check_call([
-			"ffmpeg","-version"
-		])
-	except FileNotFoundError:
-		#TODO: Report back from here
-		print("FFMpeg was missing")
-		print("Please install ffmpeg using your package manager!")
-		print("Suggestions:")
-		print("Official Website: https://ffmpeg.org/download.html")
-		print("Ubuntu/Debian: sudo apt install ffmpeg")
-		print("Arch/Manjaro: sudo pacman -S ffmpeg")
-		print("Homebrew: brew install ffmpeg")
-		return True
 
-	return False
+def ffmpeg_check():
+    try:
+        subprocess.check_call(
+            ["ffmpeg", "-version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("FFmpeg is missing or unavailable.")
+        print("Install it from https://ffmpeg.org/download.html or your package manager.")
+        return True
+    return False
+
 
 def ffmpeg_conv(in_file, out_file):
-	subprocess.check_call([
-		"ffmpeg",
-		"-y",
-		"-i", in_file,
-		"-map", "0:a",
-		"-ar", "48000",
-		out_file
-	])
+    subprocess.check_call([
+        "ffmpeg",
+        "-y",
+        "-i", str(in_file),
+        "-map", "0:a:0",
+        "-ar", "48000",
+        "-ac", "1",
+        str(out_file),
+    ])
+
 
 def cli_args():
-	parser = argparse.ArgumentParser(
-		prog="libfun",
-		description="Creates funscripts from audio",
-		formatter_class=argparse.ArgumentDefaultsHelpFormatter
-	)
+    parser = argparse.ArgumentParser(
+        prog="python-dancer",
+        description="Create funscripts from audio using beat-aligned motion planning",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
-	def irange(min,max):
-		return range(min, max+1)
-	parser.add_argument("audio_path", nargs='?', default=None, help="Path to input media")
-	parser.add_argument("--out_path", help="Path to export funscript")
-	parser.add_argument("--csv", help="Export as CSV instead of funscript", action="store_true")
-	parser.add_argument("-m", "--heatmap", help="Export heatmap", action="store_true")
-	parser.add_argument("-c", "--convert", help="Automatically use ffmpeg to convert input media", action="store_true")
-	parser.add_argument("-a", "--automap", help="Automatically find suitable pitch and energy values", action="store_true")
-	parser.add_argument("-y", "--yes", help="Overwrite funscript", action="store_true")
-	parser.add_argument("--no_plp", help="Disable PLP", action="store_true")
-	parser.add_argument("--cli", help="Use commandline", action="store_true")
-	parser.add_argument("--auto_pitch", type=int, default=20, metavar="[0-100]", choices=irange(0,100), help="Where you want the actions to generally lie in percent")
-	parser.add_argument("--auto_speed", type=int, default=250, metavar="[0-400]", choices=irange(0,400), help="The target action speed in units/s")
-	parser.add_argument("--auto_per", type=int, default=65, metavar="[0-100]", choices=irange(0,100), help="The target percent of actions that should have a speed above the specified speed")
-	parser.add_argument("--auto_mod", type=int, default=2, metavar="[1-3]", choices=irange(1,3), help="Which optimizer to use (cmean, cmeanv2, clen)")
-	parser.add_argument("--pitch", type=int, default=100, metavar="[-200-200]", choices=irange(-200,200), help="The pitch")
-	parser.add_argument("--energy", type=int, default=10, metavar="[0-100]", choices=irange(0,100), help="The energy magnitude")
-	parser.add_argument("--amplitude_centering", type=int, default=0, metavar="[-100-100]", choices=irange(-100,100), help="Amplitude-based centering shift")
-	parser.add_argument("--overflow", type=int, default=0, metavar="[0-2]", choices=irange(0,2), help="Overflow type")
-	parser.add_argument("--center_offset", type=int, default=0, metavar="[-100-100]", choices=irange(-100,100), help="Center offset shift")
+    parser.add_argument("audio_path", nargs="?", default=None, help="Path to input media")
+    parser.add_argument("--out_path", help="Path to export funscript")
+    parser.add_argument("--csv", help="Export as CSV instead of funscript", action="store_true")
+    parser.add_argument("-m", "--heatmap", help="Export a speed heatmap", action="store_true")
+    parser.add_argument("-c", "--convert", help="Convert input media to mono WAV with ffmpeg first", action="store_true")
+    parser.add_argument("-a", "--automap", help="Automatically select pitch range and energy", action="store_true")
+    parser.add_argument("-y", "--yes", help="Overwrite an existing output", action="store_true")
+    parser.add_argument("--no_plp", help="Disable PLP beat estimation", action="store_true")
+    parser.add_argument("--cli", help="Use command line mode instead of GUI", action="store_true")
 
-	return parser
+    parser.add_argument("--planner", choices=("adaptive", "legacy"), default="adaptive", help="Motion planner")
+    parser.add_argument("--subdivision", type=int, choices=(0, 1, 2, 4), default=0, help="Strokes per beat; 0 selects automatically")
+    parser.add_argument("--max_speed", type=float, default=400.0, help="Maximum position units per second; <=0 disables")
+    parser.add_argument("--max_acceleration", type=float, default=2400.0, help="Maximum position units/s^2; <=0 disables")
+    parser.add_argument("--min_interval", type=float, default=0.02, help="Minimum seconds between emitted actions")
 
+    parser.add_argument("--auto_pitch", type=float, default=50.0, metavar="[0-100]", help="Target average position")
+    parser.add_argument("--auto_speed", type=float, default=250.0, metavar="[0+]", help="Target action speed in units/s")
+    parser.add_argument("--auto_per", type=float, default=65.0, metavar="[0-100]", help="Target percent of actions above target speed")
+    parser.add_argument("--auto_mod", type=int, default=2, choices=(1, 2, 3), help="Optimizer objective: mean speed, high-speed share, or travel length")
+
+    parser.add_argument("--pitch", type=float, default=100.0, metavar="[-200-200]", help="Pitch-to-center range")
+    parser.add_argument("--energy", type=float, default=1.0, metavar="[0+]", help="Energy-to-range multiplier")
+    parser.add_argument("--amplitude_centering", type=float, default=0.0, metavar="[-200-200]", help="Energy-based center shift")
+    parser.add_argument("--overflow", type=int, default=0, choices=(0, 1, 2), help="Overflow mode: crop, bounce, fold")
+    parser.add_argument("--center_offset", type=float, default=0.0, metavar="[-300-300]", help="Center offset shift")
+    return parser

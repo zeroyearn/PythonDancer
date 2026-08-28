@@ -1,16 +1,18 @@
-from . import cli
-from . import ui
-from . import util
+"""PythonDancer package entry point."""
+from __future__ import annotations
+
 
 def main():
-	parser = util.cli_args()
-	args = parser.parse_args()
+    from .util import cli_args
 
-	if (args.cli):
-		cli.cmd(args)
-	else:
-		ui.ux(args)
+    args = cli_args().parse_args()
+    if args.cli:
+        from .cli import cmd
+        return cmd(args)
 
-if __name__ == "__main__":
-	main()
-	
+    from .ui import ux
+    ux(args)
+    return 0
+
+
+__all__ = ["main"]
