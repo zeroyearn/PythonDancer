@@ -58,6 +58,16 @@ def cli_args():
     parser.add_argument("--axis_strength", type=float, default=1.0, metavar="[0+]", help="Global amplitude multiplier for L1/L2/R0/R1/R2")
     parser.add_argument("--no_manifest", action="store_true", help="Do not write the .motion.json bundle manifest")
 
+    tcode = parser.add_argument_group("TCode v0.3 device output")
+    tcode.add_argument("--tcode", action="store_true", help="Export a scheduled .tcode script next to the normal output")
+    tcode.add_argument("--tcode_out", help="Custom path for the scheduled .tcode script")
+    tcode.add_argument("--tcode_preview", type=int, default=0, metavar="N", help="Print the first N scheduled TCode commands")
+    tcode.add_argument("--serial_port", help="Stream generated TCode to a serial device, e.g. COM4 or /dev/ttyUSB0")
+    tcode.add_argument("--baud", type=int, default=115200, help="Serial baud rate")
+    tcode.add_argument("--serial_timeout", type=float, default=0.25, help="Serial read timeout in seconds")
+    tcode.add_argument("--play_speed", type=float, default=1.0, metavar="[0+]", help="Real-time TCode playback speed multiplier")
+    tcode.add_argument("--list_ports", action="store_true", help="List serial ports and exit")
+
     parser.add_argument("--auto_pitch", type=float, default=50.0, metavar="[0-100]", help="Target average position")
     parser.add_argument("--auto_speed", type=float, default=250.0, metavar="[0+]", help="Target action speed in units/s")
     parser.add_argument("--auto_per", type=float, default=65.0, metavar="[0-100]", help="Target percent of actions above target speed")
