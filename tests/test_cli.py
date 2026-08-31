@@ -16,6 +16,13 @@ def test_cli_v2_defaults():
     assert args.bars_per_phrase == 4
     assert args.section_bars == 4
     assert args.show_sections is False
+    assert args.profile is None
+    assert args.reference_bundle is None
+    assert args.save_learned_profile is None
+    assert args.stems == "off"
+    assert args.stem_dir is None
+    assert args.stem_cache == ".dancer_stems"
+    assert args.demucs_model == "htdemucs"
     assert args.baud == 115200
     assert args.play_speed == 1.0
     assert args.start_at == 0.0
@@ -38,6 +45,13 @@ def test_cli_multiaxis_flags():
         "--bars_per_phrase", "8",
         "--section_bars", "2",
         "--show_sections",
+        "--reference_bundle", "reference.funscript",
+        "--save_learned_profile", "style.json",
+        "--profile_name", "favorite",
+        "--stems", "required",
+        "--stem_dir", "stems",
+        "--stem_cache", "cache",
+        "--demucs_model", "htdemucs_ft",
     ])
     assert args.multiaxis is True
     assert args.multiaxis_preset == "expressive"
@@ -48,6 +62,13 @@ def test_cli_multiaxis_flags():
     assert args.bars_per_phrase == 8
     assert args.section_bars == 2
     assert args.show_sections is True
+    assert args.reference_bundle == "reference.funscript"
+    assert args.save_learned_profile == "style.json"
+    assert args.profile_name == "favorite"
+    assert args.stems == "required"
+    assert args.stem_dir == "stems"
+    assert args.stem_cache == "cache"
+    assert args.demucs_model == "htdemucs_ft"
 
 
 def test_cli_tcode_device_flags():
