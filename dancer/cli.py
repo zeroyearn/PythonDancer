@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import sleep
 
 from .libfun import autoval, create_actions, dump_csv, dump_funscript, load_audio_data, render_heatmap
 from .motion import MotionConfig
 from .multiaxis import AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, bundle_paths, export_funscript_bundle, plan_multiaxis
+from .outputs import play_plan_intiface_sync
+from .safety import add_auto_home
 from .stems import enrich_with_stems
 from .style import ChoreographyProfile, learn_profile_from_bundle, load_profile, save_profile
 from .tcode import (
@@ -12,6 +15,7 @@ from .tcode import (
     TCodePlaybackController,
     build_tcode_events,
     default_tcode_path,
+    encode_plan_frame,
     export_tcode_script,
     list_serial_ports,
 )
@@ -49,11 +53,19 @@ def _print_device_profile(profile) -> None:
         print("D2 axes: no parseable axis rows; falling back to generated axes/full range.")
 
 
+def _live_plan(args, plan):
+    if args.auto_home:
+        return add_auto_home(plan, home_ms=int(args.home_ms))
+    return {axis: list(actions) for axis, actions in plan.items()}
+
+
 def _handle_tcode(args, plan, out_file: Path, source: Path) -> int:
     requested = bool(args.tcode or args.tcode_out or args.tcode_preview > 0 or args.serial_port)
     if not requested:
         return 0
 
+    # Exported scripts remain canonical. Soft Start / Auto Home are live-device
+    # policies and are intentionally not baked into the exported .tcode file.
     events = build_tcode_events(plan)
     if not events:
         print("No TCode events could be generated.")
@@ -71,37 +83,90 @@ def _handle_tcode(args, plan, out_file: Path, source: Path) -> int:
             print(f"  {int(round(event.send_at * 1000)):>7} ms  {event.command}")
 
     if args.serial_port:
+        playback_plan = _live_plan(args, plan)
         print(f"Opening TCode serial device {args.serial_port} @ {args.baud}...")
         try:
             with SerialTCodeDevice(args.serial_port, baud=args.baud, timeout=args.serial_timeout) as device:
-                profile = device.profile()
-                _print_device_profile(profile)
-                active = profile.active_motion_axes(plan)
-                if profile.axes:
-                    print("Playback axes: " + ", ".join(active or ("none",)))
-                    if not active:
-                        print("The device did not report any generated motion axes in D2.")
-                        return 2
-                calibration = "D2 range mapping" if not args.no_device_ranges else "full 0000..9999 range"
-                controller = TCodePlaybackController(
-                    plan,
-                    device,
-                    speed=args.play_speed,
-                    profile=profile,
-                    use_device_ranges=not args.no_device_ranges,
-                    seek_ramp_ms=args.seek_ramp_ms,
-                )
-                print(f"Playing from {args.start_at:.3f}s at {args.play_speed:g}x using {calibration}. Ctrl+C sends DSTOP.")
                 try:
-                    controller.play(start_at=args.start_at)
-                except KeyboardInterrupt:
-                    controller.stop()
-                    print("Playback interrupted; DSTOP sent.")
-                    return 130
+                    profile = device.profile()
+                    _print_device_profile(profile)
+                    active = profile.active_motion_axes(playback_plan)
+                    if profile.axes:
+                        print("Playback axes: " + ", ".join(active or ("none",)))
+                        if not active:
+                            print("The device did not report any generated motion axes in D2.")
+                            return 2
+                    calibration = "D2 range mapping" if not args.no_device_ranges else "full 0000..9999 range"
+                    controller_profile = profile if not args.no_device_ranges else None
+                    seek_ramp_ms = max(int(args.seek_ramp_ms), int(args.soft_start_ms))
+                    if args.soft_start_ms > 0 and args.start_at <= 1e-9:
+                        device.stop()
+                        command = encode_plan_frame(
+                            playback_plan,
+                            0.0,
+                            profile=controller_profile,
+                            interval_ms=int(args.soft_start_ms),
+                        )
+                        if command:
+                            device.send(command)
+                            sleep(args.soft_start_ms / 1000.0)
+                    controller = TCodePlaybackController(
+                        playback_plan,
+                        device,
+                        speed=args.play_speed,
+                        profile=profile,
+                        use_device_ranges=not args.no_device_ranges,
+                        seek_ramp_ms=seek_ramp_ms,
+                    )
+                    print(
+                        f"Playing from {args.start_at:.3f}s at {args.play_speed:g}x using {calibration}; "
+                        f"soft-start={args.soft_start_ms} ms, auto-home={'on' if args.auto_home else 'off'}. Ctrl+C sends DSTOP."
+                    )
+                    try:
+                        controller.play(start_at=args.start_at)
+                    except KeyboardInterrupt:
+                        controller.stop()
+                        print("Playback interrupted; DSTOP sent.")
+                        return 130
+                    device.stop()
+                except Exception:
+                    try:
+                        device.stop()
+                    except Exception:
+                        pass
+                    raise
         except Exception as exc:
             print(f"TCode serial playback failed: {exc}")
             return 2
         print("TCode playback complete.")
+    return 0
+
+
+def _handle_intiface(args, plan) -> int:
+    if not args.intiface:
+        return 0
+    playback_plan = _live_plan(args, plan)
+    print(
+        f"Opening Intiface Central at {args.intiface_address}; "
+        f"device={args.intiface_device if args.intiface_device is not None else 'first available'}, "
+        f"soft-start={args.soft_start_ms} ms, auto-home={'on' if args.auto_home else 'off'}..."
+    )
+    try:
+        play_plan_intiface_sync(
+            playback_plan,
+            address=args.intiface_address,
+            device_index=args.intiface_device,
+            speed=args.play_speed,
+            start_at=args.start_at,
+            soft_start_ms=args.soft_start_ms,
+        )
+    except KeyboardInterrupt:
+        print("Intiface playback interrupted; device stop requested by client cleanup.")
+        return 130
+    except Exception as exc:
+        print(f"Intiface playback failed: {exc}")
+        return 2
+    print("Intiface playback complete.")
     return 0
 
 
@@ -213,6 +278,12 @@ def cmd(args):
     if args.multiaxis and args.planner != "adaptive":
         print("--multiaxis currently requires --planner adaptive for the primary L0 axis.")
         return 2
+    if args.intiface and not args.multiaxis:
+        print("--intiface requires --multiaxis.")
+        return 2
+    if args.intiface and args.serial_port:
+        print("Choose one live output: --serial_port or --intiface, not both.")
+        return 2
     if args.axis_strength < 0 or args.gesture_strength < 0:
         print("--axis_strength and --gesture_strength must be non-negative.")
         return 2
@@ -225,8 +296,14 @@ def cmd(args):
     if args.start_at < 0:
         print("--start_at must be non-negative.")
         return 2
-    if args.seek_ramp_ms < 0:
-        print("--seek_ramp_ms must be non-negative.")
+    if args.seek_ramp_ms < 0 or args.soft_start_ms < 0:
+        print("--seek_ramp_ms and --soft_start_ms must be non-negative.")
+        return 2
+    if args.home_ms < 50:
+        print("--home_ms must be at least 50 ms.")
+        return 2
+    if args.intiface_device is not None and args.intiface_device < 0:
+        print("--intiface_device must be non-negative.")
         return 2
 
     try:
@@ -359,6 +436,9 @@ def cmd(args):
             tcode_status = _handle_tcode(args, plan, written["L0"], Path(args.audio_path))
             if tcode_status:
                 return tcode_status
+            intiface_status = _handle_intiface(args, plan)
+            if intiface_status:
+                return intiface_status
             print("Done: six-axis bundle generated")
             return 0
 
