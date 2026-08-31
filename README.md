@@ -22,7 +22,7 @@ PythonDancer turns audio or video soundtracks into `.funscript` motion. This for
 
 The multi-axis planner generates the standard SR6/OSR6 axis set: `L0` stroke, `L1` surge, `L2` sway, `R0` twist, `R1` roll and `R2` pitch. L0 stays on the V2 adaptive planner; secondary axes share its timing skeleton but use different rhythmic/spectral feature mixes and physical limits instead of mirroring L0.
 
-TCode v0.3 output maps normalized positions to `0000..9999`, combines active axes in one newline-delimited command, and uses `I<milliseconds>` ramp intervals so targets are sent ahead of arrival time.
+TCode v0.3 output maps normalized positions to device ranges, combines active axes in one newline-delimited command, and uses `I<milliseconds>` ramp intervals so targets are sent ahead of arrival time.
 
 ## Install
 
@@ -64,7 +64,7 @@ Six-axis GUI:
 python -m dancer scene.mp4 --multiaxis
 ```
 
-The six-axis GUI previews all channels and includes preset/strength controls, TCode export, serial-port discovery, live playback and `DSTOP`.
+The six-axis GUI previews all channels and includes preset/strength controls, TCode export, serial-port discovery, D2 device probing, live playback, a seekable timeline, Pause/Resume, and `DSTOP`.
 
 ## Six-axis / SR6 output
 
@@ -119,16 +119,24 @@ List ports:
 python -m dancer --cli --list_ports
 ```
 
+Probe one device without generating motion:
+
+```bash
+python -m dancer --cli --serial_port COM4 --device_info
+```
+
 Live serial playback:
 
 ```bash
 python -m dancer scene.mp4 --cli --yes --multiaxis --serial_port /dev/ttyUSB0 --baud 115200
 ```
 
-Windows:
+Start at a specific timeline position:
 
 ```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis --serial_port COM4
+python -m dancer scene.mp4 --cli --yes --multiaxis \
+  --serial_port COM4 \
+  --start_at 42.5
 ```
 
 Key flags:
@@ -138,6 +146,10 @@ Key flags:
 --baud 115200
 --serial_timeout 0.25
 --play_speed 1.0
+--start_at SECONDS
+--seek_ramp_ms 120
+--no_device_ranges
+--device_info
 --tcode_preview N
 --tcode
 --tcode_out PATH
@@ -145,13 +157,43 @@ Key flags:
 
 Before playback PythonDancer sends `D0`, `D1` and `D2`. `Ctrl+C` in CLI playback or the GUI **STOP** button sends `DSTOP`.
 
+### D2 axis range auto-mapping
+
+TCode devices commonly report D2 rows in this form:
+
+```text
+L0 1000 9000 Up
+R0 2000 8000 Twist
+```
+
+PythonDancer parses these saved device preferences and, by default, maps its normalized `0..100` motion into each reported range. It also sends only generated axes that the device actually reports. For the example above:
+
+```text
+L0 0%   -> 1000
+L0 50%  -> 5000
+L0 100% -> 9000
+```
+
+This is a profile/range mapping step; it does **not** physically drive the mechanism into end stops. Use `--no_device_ranges` or uncheck **Use D2 ranges** in the GUI to force the full `0000..9999` command range.
+
 ### Scheduling model
 
-For target `t[n]`, PythonDancer sends the frame at `t[n-1]` with `I=(t[n]-t[n-1])` milliseconds. All six axes are placed on one line and committed by one newline, so the device ramps toward the next synchronized target during the interval.
+For target `t[n]`, PythonDancer sends the frame at `t[n-1]` with `I=(t[n]-t[n-1])` milliseconds. All active axes are placed on one line and committed by one newline, so the device ramps toward the next synchronized target during the interval.
+
+### Pause / Resume / Seek
+
+The six-axis GUI contains a live timeline slider:
+
+- **Pause** records the current timeline point and sends `DSTOP`. No additional position command is sent while paused.
+- **Resume** synchronizes the device to the frozen timeline position using `--seek_ramp_ms`, then rebuilds future ramp-ahead events from that point.
+- **Seek** can be used during playback or while paused. Releasing the timeline slider sends `DSTOP`, maps all active axes to the selected timestamp, ramps to that pose, and rebuilds the remaining schedule.
+- **STOP** terminates playback and sends `DSTOP`.
+
+The playback controller is also exposed through Python as `TCodePlaybackController` for external player integrations.
 
 ## Physical limits
 
-L0 defaults to `400` normalized units/s, `2400` units/s² and minimum interval `0.02s`. Secondary axes use lower axis-specific limits before export. All generated scripts remain normalized to `0..100`; TCode conversion maps that to `0000..9999`.
+L0 defaults to `400` normalized units/s, `2400` units/s² and minimum interval `0.02s`. Secondary axes use lower axis-specific limits before export. All generated scripts remain normalized to `0..100`; the device layer performs the final TCode range mapping.
 
 ## Output compatibility
 
