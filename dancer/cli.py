@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .libfun import autoval, create_actions, dump_csv, dump_funscript, load_audio_data, render_heatmap
 from .motion import MotionConfig
-from .multiaxis import MultiAxisConfig, AXIS_ORDER, bundle_paths, export_funscript_bundle, plan_multiaxis
+from .multiaxis import AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, bundle_paths, export_funscript_bundle, plan_multiaxis
 from .tcode import (
     SerialTCodeDevice,
     TCodePlaybackController,
@@ -89,10 +89,7 @@ def _handle_tcode(args, plan, out_file: Path, source: Path) -> int:
                     use_device_ranges=not args.no_device_ranges,
                     seek_ramp_ms=args.seek_ramp_ms,
                 )
-                print(
-                    f"Playing from {args.start_at:.3f}s at {args.play_speed:g}x using {calibration}. "
-                    "Ctrl+C sends DSTOP."
-                )
+                print(f"Playing from {args.start_at:.3f}s at {args.play_speed:g}x using {calibration}. Ctrl+C sends DSTOP.")
                 try:
                     controller.play(start_at=args.start_at)
                 except KeyboardInterrupt:
@@ -117,6 +114,19 @@ def _device_info(args) -> int:
         print(f"Unable to query TCode device: {exc}")
         return 2
     return 0
+
+
+def _multi_config(args, motion: MotionConfig) -> MultiAxisConfig:
+    return MultiAxisConfig(
+        motion=motion,
+        preset=args.multiaxis_preset,
+        strength=float(args.axis_strength),
+        mode=args.choreography_mode,
+        gesture_strength=float(args.gesture_strength),
+        beats_per_bar=int(args.beats_per_bar),
+        bars_per_phrase=int(args.bars_per_phrase),
+        section_bars=int(args.section_bars),
+    )
 
 
 def cmd(args):
@@ -150,8 +160,11 @@ def cmd(args):
     if args.multiaxis and args.planner != "adaptive":
         print("--multiaxis currently requires --planner adaptive for the primary L0 axis.")
         return 2
-    if args.axis_strength < 0:
-        print("--axis_strength must be non-negative.")
+    if args.axis_strength < 0 or args.gesture_strength < 0:
+        print("--axis_strength and --gesture_strength must be non-negative.")
+        return 2
+    if args.beats_per_bar <= 0 or args.bars_per_phrase <= 0 or args.section_bars <= 0:
+        print("--beats_per_bar, --bars_per_phrase, and --section_bars must be positive integers.")
         return 2
     if args.play_speed <= 0:
         print("--play_speed must be greater than zero.")
@@ -213,7 +226,6 @@ def cmd(args):
             print(f"Automap: pitch={pitch:.2f}, energy={energy:.2f}")
 
         if args.multiaxis:
-            print(f"Creating six-axis motion ({args.multiaxis_preset})...")
             motion = MotionConfig(
                 energy_multiplier=float(args.energy),
                 pitch_range=float(args.pitch),
@@ -225,14 +237,32 @@ def cmd(args):
                 max_acceleration=float(args.max_acceleration),
                 min_interval=float(args.min_interval),
             )
-            plan = plan_multiaxis(data, MultiAxisConfig(motion=motion, preset=args.multiaxis_preset, strength=float(args.axis_strength)))
+            config = _multi_config(args, motion)
+            analysis = analyze_multiaxis(data, config)
+            print(f"Creating six-axis motion ({config.mode}, preset={config.preset})...")
+            if args.show_sections and analysis.sections:
+                print("Detected sections:")
+                for section in analysis.sections:
+                    print(
+                        f"  beats {section.start_beat:>4}-{section.end_beat:<4} {section.label:<10} "
+                        f"energy={section.energy:.2f} activity={section.activity:.2f} novelty={section.novelty:.2f}"
+                    )
+            plan = plan_multiaxis(data, config)
             if not plan["L0"]:
                 print("No actions could be generated from this input.")
                 return 2
+            summary = analysis.summary()
             written = export_funscript_bundle(
                 out_file,
                 plan,
-                metadata={"notes": f"planner=multiaxis; preset={args.multiaxis_preset}; subdivision={args.subdivision}; axis_strength={args.axis_strength}"},
+                metadata={
+                    "notes": (
+                        f"planner=multiaxis; mode={config.mode}; preset={config.preset}; "
+                        f"gesture_strength={config.gesture_strength}; subdivision={args.subdivision}; "
+                        f"axis_strength={args.axis_strength}"
+                    ),
+                    "choreography_sections": summary,
+                },
                 manifest=not args.no_manifest,
             )
             print("Wrote multi-axis bundle:")
@@ -240,6 +270,8 @@ def cmd(args):
                 print(f"  {axis}: {written[axis]} ({len(plan[axis])} actions)")
             if "manifest" in written:
                 print(f"  manifest: {written['manifest']}")
+            if summary:
+                print(f"Sections: {summary}")
             if args.heatmap:
                 heatmap_file = written["L0"].with_stem(written["L0"].stem + "_heatmap").with_suffix(".png")
                 render_heatmap(
