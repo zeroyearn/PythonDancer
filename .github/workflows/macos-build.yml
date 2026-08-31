@@ -1,0 +1,64 @@
+name: macOS build
+
+on:
+  push:
+    branches: ["master", "feat/**"]
+  pull_request:
+    branches: ["master"]
+  workflow_dispatch:
+
+jobs:
+  macos-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Verify runner architecture
+        shell: bash
+        run: |
+          echo "runner=$(uname -m) expected=${{ matrix.arch }}"
+          test "$(uname -m)" = "${{ matrix.arch }}"
+
+      - name: Install FFmpeg
+        shell: bash
+        run: |
+          brew update
+          brew install ffmpeg
+          ffmpeg -version | head -n 1
+
+      - name: Install Python dependencies
+        run: python -m pip install -e '.[build,test]'
+
+      - name: Compile
+        run: python -m compileall -q dancer tests macos_entry.py
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Build macOS app
+        shell: bash
+        run: bash scripts/build_macos.sh 2.3.0 "${{ matrix.arch }}"
+
+      - name: Upload macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PythonDancer-2.3.0-macOS-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            PythonDancer-2.3.0-macOS-${{ matrix.arch }}.zip
+            PythonDancer-2.3.0-macOS-${{ matrix.arch }}.dmg
+            PythonDancer-2.3.0-macOS-${{ matrix.arch }}.sha256
