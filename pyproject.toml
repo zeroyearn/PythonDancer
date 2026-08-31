@@ -14,10 +14,10 @@ dependencies = [
   "librosa>=0.10.2,<0.12",
   "matplotlib>=3.7,<4",
   "pyserial>=3.5,<4",
-  "buttplug>=1.0,<2",
 ]
 
 [project.optional-dependencies]
+intiface = ["buttplug>=1.0,<2"]
 build = ["pyinstaller>=6,<7", "requests>=2.31,<3"]
 test = ["pytest>=8,<9"]
 
