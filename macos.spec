@@ -28,6 +28,7 @@ hiddenimports = sorted(set(
         "dancer.tcode",
         "dancer.runtime",
         "dancer.workstation_ui_v25",
+        "dancer.workstation_ui_v25_final",
         "dancer.editing",
         "dancer.safety",
         "dancer.project",
