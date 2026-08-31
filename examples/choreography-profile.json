@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "name": "custom-example",
+  "axis_scale": {
+    "L1": 1.0,
+    "L2": 1.15,
+    "R0": 1.1,
+    "R1": 1.0,
+    "R2": 0.9
+  },
+  "gesture_gain": {
+    "pulse": 1.0,
+    "sway": 1.15,
+    "rock": 0.9,
+    "circle": 1.1,
+    "spiral": 1.2,
+    "wave": 0.9,
+    "accent": 1.0
+  },
+  "section_gain": {
+    "intro": 0.9,
+    "verse": 1.0,
+    "build": 1.05,
+    "chorus": 1.1,
+    "drop": 1.15,
+    "breakdown": 0.85,
+    "outro": 0.8
+  },
+  "coupling_gain": {
+    "sway_roll": 1.0,
+    "surge_pitch": 1.0,
+    "stroke_twist": 1.0,
+    "stroke_bass_l1": 1.0
+  },
+  "reactive_mix": 0.34,
+  "smoothing": 0.2,
+  "stem_influence": 1.0,
+  "metadata": {
+    "notes": "Copy this file and tune values; 1.0 is neutral for multiplier fields."
+  }
+}
