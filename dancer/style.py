@@ -19,6 +19,7 @@ BUNDLE_SUFFIXES = {
     "R1": ".roll",
     "R2": ".pitch",
 }
+REFERENCE_BASE_AMPLITUDE = {"L1": 17.0, "L2": 18.0, "R0": 30.0, "R1": 20.0, "R2": 19.0}
 
 
 def _finite(value: float, default: float) -> float:
@@ -39,12 +40,7 @@ def _bounded_map(values: Mapping[str, float] | None, allowed: tuple[str, ...], *
 
 @dataclass(frozen=True)
 class ChoreographyProfile:
-    """Portable style overrides applied on top of the selected built-in preset.
-
-    Empty maps are intentionally neutral. A profile can therefore contain only
-    the dimensions learned or hand-tuned by the user without duplicating every
-    built-in choreography constant.
-    """
+    """Portable style overrides applied on top of the selected built-in preset."""
 
     name: str = "default"
     axis_scale: Mapping[str, float] = field(default_factory=dict)
@@ -180,9 +176,8 @@ def _correlation(a: np.ndarray, b: np.ndarray) -> float:
 def learn_profile_from_bundle(prefix: str | Path, *, name: str | None = None) -> ChoreographyProfile:
     """Infer a compact motion style from an existing MultiFunPlayer bundle.
 
-    This is statistical style transfer, not semantic imitation. It learns robust
-    per-axis travel, smooth-vs-accent character, and cross-axis relationships.
-    The generated choreography still follows the new track's own musical timing.
+    The learner extracts statistical movement character only. Timestamps and
+    positions are never copied into the new song's choreography.
     """
     paths = _bundle_paths(prefix)
     loaded = {axis: _load_actions(path) for axis, path in paths.items()}
@@ -194,14 +189,17 @@ def learn_profile_from_bundle(prefix: str | Path, *, name: str | None = None) ->
     if duration <= 0:
         raise ValueError("reference bundle contains no usable timeline")
     grid = np.arange(0.0, duration + 1e-9, 0.05, dtype=np.float64)
-    signals = {axis: _sample(*loaded[axis], grid) - 50.0 for axis in loaded}
+    sampled = {axis: _sample(*loaded[axis], grid) for axis in loaded}
+    centers = {axis: float(np.median(values)) if values.size else 50.0 for axis, values in sampled.items()}
+    signals = {axis: values - centers[axis] for axis, values in sampled.items()}
 
     amplitudes: dict[str, float] = {}
     activity: dict[str, float] = {}
     for axis in SECONDARY_AXES:
         signal = signals[axis]
         robust_amp = float(np.quantile(np.abs(signal), 0.90)) if signal.size else 0.0
-        amplitudes[axis] = float(np.clip(robust_amp / 20.0, 0.20, 2.50)) if axis in present else 1.0
+        baseline = REFERENCE_BASE_AMPLITUDE[axis]
+        amplitudes[axis] = float(np.clip(robust_amp / baseline, 0.20, 2.50)) if axis in present else 1.0
         if signal.size > 1 and robust_amp > 1e-6:
             speed = np.abs(np.diff(signal)) / 0.05
             activity[axis] = float(np.clip(np.quantile(speed, 0.75) / max(robust_amp * 8.0, 1.0), 0.0, 1.0))
@@ -238,6 +236,7 @@ def learn_profile_from_bundle(prefix: str | Path, *, name: str | None = None) ->
             "source_bundle": str(prefix),
             "duration": duration,
             "present_axes": present,
+            "reference_centers": centers,
             "learner": "PythonDancer statistical reference style v1",
         },
     )
