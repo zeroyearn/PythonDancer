@@ -470,3 +470,7 @@ R1/R2  200 units/s, 1200 units/s²
 ```
 
 All planner output remains normalized to `0..100`; the TCode layer performs final device-range mapping.
+
+## Validation status
+
+The branch includes regression coverage for choreography phase/sections, profile round trips, reference-style learning, profile-driven trajectory changes, stem discovery/fallback, stem-driven trajectory changes, six-axis export, TCode, D2 mapping, and seekable playback. GitHub Actions on this fork is still not creating workflow runs, so these newly added 2.3 tests have not been executed by remote CI in this PR.
