@@ -205,9 +205,6 @@ def apply_smart_limits(plan, profile: SmartLimitProfile | str = "balanced"):
                     scale = profile.sway_roll_budget / max(total, 1e-9)
                     value = 50.0 + (value - 50.0) * scale
 
-            # Budget simultaneous velocity as a fraction of each axis' own
-            # speed limit. The anchor is the immediately preceding sampled pose,
-            # so only the current step is softened and keyframe timing stays put.
             velocity_load = _normalized_velocity_load(result, at)
             if velocity_load > profile.simultaneous_velocity_budget:
                 scale = profile.simultaneous_velocity_budget / max(velocity_load, 1e-9)
@@ -289,7 +286,7 @@ def fill_motion_gaps(plan, beats: Sequence[float], *, mode: str = "ambient", thr
                     delta = axis_amp[axis] * np.sin(np.pi * alpha) * (1 if index % 2 == 0 else -1)
                 elif mode == "beat":
                     delta = axis_amp[axis] * 1.35 * (1 if index % 2 == 0 else -1)
-                else:  # repeat
+                else:
                     delta = (a_p - 50.0) * .55 * (1 if index % 2 == 0 else -1)
                 additions.append((float(at), float(np.clip(baseline + delta, 0.0, 100.0))))
         result[axis] = sorted([*actions, *additions], key=lambda item: item[0])
@@ -311,8 +308,8 @@ def add_soft_start(plan, start_at: float, *, duration_ms: int = 750, neutral: fl
         if not result[axis]:
             continue
         target = sample_axis(result[axis], start_at, neutral)
-        retained = [(at + shift, pos) for at, pos in result[axis] if at >= start_at]
         ramp_end = start_at + shift
+        retained = [(at + shift, pos) for at, pos in result[axis] if at > start_at + 1e-9]
         result[axis] = sorted(
             [(max(0.0, ramp_end - ramp), float(neutral)), (ramp_end, target), *retained],
             key=lambda item: item[0],
