@@ -21,7 +21,7 @@ def ffmpeg_conv(in_file, out_file):
 def cli_args():
     parser = argparse.ArgumentParser(
         prog="python-dancer",
-        description="Create single- or six-axis funscripts from audio using beat-aligned motion planning",
+        description="Create single- or six-axis funscripts from audio using beat-aware choreography",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -41,10 +41,17 @@ def cli_args():
     parser.add_argument("--max_acceleration", type=float, default=2400.0, help="Maximum L0 position units/s^2; <=0 disables")
     parser.add_argument("--min_interval", type=float, default=0.02, help="Minimum seconds between emitted actions")
 
-    parser.add_argument("--multiaxis", action="store_true", help="Generate an SR6/OSR6-style L0/L1/L2/R0/R1/R2 funscript bundle")
-    parser.add_argument("--multiaxis_preset", choices=("balanced", "rhythm", "expressive"), default="balanced", help="Secondary-axis motion character")
-    parser.add_argument("--axis_strength", type=float, default=1.0, metavar="[0+]", help="Global amplitude multiplier for L1/L2/R0/R1/R2")
-    parser.add_argument("--no_manifest", action="store_true", help="Do not write the .motion.json bundle manifest")
+    multi = parser.add_argument_group("six-axis choreography")
+    multi.add_argument("--multiaxis", action="store_true", help="Generate an SR6/OSR6-style L0/L1/L2/R0/R1/R2 funscript bundle")
+    multi.add_argument("--multiaxis_preset", choices=("balanced", "rhythm", "expressive"), default="balanced", help="Secondary-axis motion character")
+    multi.add_argument("--axis_strength", type=float, default=1.0, metavar="[0+]", help="Global amplitude multiplier for L1/L2/R0/R1/R2")
+    multi.add_argument("--choreography_mode", choices=("choreography", "reactive"), default="choreography", help="Gesture/section engine or original reactive formulas")
+    multi.add_argument("--gesture_strength", type=float, default=1.0, metavar="[0+]", help="Gesture contribution inside choreography mode")
+    multi.add_argument("--beats_per_bar", type=int, default=4, metavar="N", help="Musical meter used for bar phase")
+    multi.add_argument("--bars_per_phrase", type=int, default=4, metavar="N", help="Bars in the long phrase phase")
+    multi.add_argument("--section_bars", type=int, default=4, metavar="N", help="Phrase-aligned bars per section-analysis window")
+    multi.add_argument("--show_sections", action="store_true", help="Print detected intro/verse/build/chorus/drop/breakdown/outro sections")
+    multi.add_argument("--no_manifest", action="store_true", help="Do not write the .motion.json bundle manifest")
 
     tcode = parser.add_argument_group("TCode v0.3 device output")
     tcode.add_argument("--tcode", action="store_true", help="Export a scheduled .tcode script next to the normal output")
