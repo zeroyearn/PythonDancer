@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "python-dancer"
-version = "2.2.0"
-description = "Beat-aware audio-to-funscript choreography and TCode motion generator"
+version = "2.3.0"
+description = "Beat-aware audio-to-funscript choreography, style learning, and TCode motion generator"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
