@@ -6,11 +6,7 @@ import subprocess
 
 def ffmpeg_check():
     try:
-        subprocess.check_call(
-            ["ffmpeg", "-version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        subprocess.check_call(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (FileNotFoundError, subprocess.CalledProcessError):
         print("FFmpeg is missing or unavailable.")
         print("Install it from https://ffmpeg.org/download.html or your package manager.")
@@ -19,15 +15,7 @@ def ffmpeg_check():
 
 
 def ffmpeg_conv(in_file, out_file):
-    subprocess.check_call([
-        "ffmpeg",
-        "-y",
-        "-i", str(in_file),
-        "-map", "0:a:0",
-        "-ar", "48000",
-        "-ac", "1",
-        str(out_file),
-    ])
+    subprocess.check_call(["ffmpeg", "-y", "-i", str(in_file), "-map", "0:a:0", "-ar", "48000", "-ac", "1", str(out_file)])
 
 
 def cli_args():
@@ -66,6 +54,10 @@ def cli_args():
     tcode.add_argument("--baud", type=int, default=115200, help="Serial baud rate")
     tcode.add_argument("--serial_timeout", type=float, default=0.25, help="Serial read timeout in seconds")
     tcode.add_argument("--play_speed", type=float, default=1.0, metavar="[0+]", help="Real-time TCode playback speed multiplier")
+    tcode.add_argument("--start_at", type=float, default=0.0, metavar="SECONDS", help="Start serial playback at this timeline position")
+    tcode.add_argument("--seek_ramp_ms", type=int, default=120, metavar="MS", help="Ramp time used to synchronize the device after a seek")
+    tcode.add_argument("--no_device_ranges", action="store_true", help="Ignore D2 min/max preferences and send the full 0000..9999 range")
+    tcode.add_argument("--device_info", action="store_true", help="Query D0/D1/D2 from --serial_port and exit")
     tcode.add_argument("--list_ports", action="store_true", help="List serial ports and exit")
 
     parser.add_argument("--auto_pitch", type=float, default=50.0, metavar="[0-100]", help="Target average position")
