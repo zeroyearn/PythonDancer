@@ -57,6 +57,8 @@ Mute   removes that axis from export and live device playback
 Lock   preserves that axis during local regeneration
 ```
 
+If L0 is muted, TCode playback automatically uses the remaining active axes as its timing source instead of going silent.
+
 The 3D tab is a normalized 6DoF pose visualization. It is not yet an exact SR6 linkage/inverse-kinematics simulation.
 
 ## Install
@@ -423,4 +425,4 @@ R1/R2  200 units/s, 1200 units/s²
 
 ## Validation
 
-GitHub Actions is active on this fork. The test matrix runs supported Python versions and Windows packaging. Workstation regression coverage includes waveform envelopes, gesture overlays, Solo/Mute semantics, axis Lock behavior, range splicing/crossfades, section edits, workspace serialization, and the post-edit physical constraint pass, in addition to the existing choreography/profile/stem/TCode/D2/playback tests.
+GitHub Actions is active on this fork. The test matrix runs supported Python versions and Windows packaging. Workstation regression coverage includes waveform envelopes, gesture overlays, Solo/Mute semantics, axis Lock behavior, range splicing/crossfades, section edits, workspace serialization, non-L0 TCode timelines, and the post-edit physical constraint pass, in addition to the existing choreography/profile/stem/TCode/D2/playback tests.
