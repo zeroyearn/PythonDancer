@@ -50,8 +50,6 @@ class MultiAxisWindow(_EditorWindow):
     def _redraw_workspace_preview(self):
         if not self.workspace or self.base_plan is None:
             return
-        # Preview the exact constrained output. Solo then acts only as a visual
-        # filter and never mutates ``self.plan`` used by export/device playback.
         preview = {axis: list(self.plan.get(axis, ())) for axis in AXIS_ORDER}
         if self.workspace.solo_axis is not None:
             preview = {
@@ -93,13 +91,7 @@ class MultiAxisWindow(_EditorWindow):
         self.canvas.draw_idle()
 
     def _device_plan(self):
-        """Return only axes with actions so TCode can select a non-L0 clock.
-
-        The core TCode builder prefers L0 whenever the L0 key exists. A muted L0
-        is represented as an empty funscript axis for bundle compatibility, so
-        removing empty keys here lets TCode merge the remaining active axes and
-        continue playback correctly.
-        """
+        """Drop muted/empty axes so TCode can select a non-L0 timing source."""
         return {
             axis: list(self.plan.get(axis, ()))
             for axis in AXIS_ORDER
@@ -140,8 +132,7 @@ class MultiAxisWindow(_EditorWindow):
             return
         try:
             port, baud, speed = self._serial_settings()
-        except (ValueError, Exception) as exc:
-            # TclError is an Exception too; keep the UI message compact.
+        except Exception as exc:
             messagebox.showwarning("PythonDancer", str(exc))
             return
         timeout = float(self.args.serial_timeout)
