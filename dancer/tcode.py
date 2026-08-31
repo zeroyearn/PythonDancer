@@ -406,6 +406,7 @@ class TCodePlaybackController:
                 self._base_real = monotonic() - offset / self.speed
                 self._state = "paused" if self._paused else "playing"
             restart = False
+            restart_sync = False
 
             while index < len(events):
                 with self._condition:
@@ -422,6 +423,7 @@ class TCodePlaybackController:
                         self._position = offset
                         self.device.stop()
                         restart = True
+                        restart_sync = True
                         break
                     if self._paused:
                         self._condition.wait(timeout=0.05)
@@ -429,6 +431,7 @@ class TCodePlaybackController:
                     if self._state == "paused":
                         offset = self._position
                         restart = True
+                        restart_sync = True
                         self._state = "playing"
                         break
 
@@ -436,8 +439,17 @@ class TCodePlaybackController:
                 deadline = self._base_real + event.send_at / self.speed
                 while True:
                     with self._condition:
-                        if self._stop_requested or self._seek_requested is not None or self._paused:
+                        if self._stop_requested:
                             restart = True
+                            restart_sync = False
+                            break
+                        if self._seek_requested is not None:
+                            restart = True
+                            restart_sync = True
+                            break
+                        if self._paused:
+                            restart = True
+                            restart_sync = False
                             break
                     remaining = deadline - monotonic()
                     if remaining <= 0:
@@ -458,10 +470,13 @@ class TCodePlaybackController:
                         offset = self._seek_requested
                         self._seek_requested = None
                         self._position = offset
+                        restart_sync = True
                     else:
                         offset = self._position
+                    paused = self._paused
                 self.device.stop()
-                self._sync_position(offset)
+                if restart_sync and (not paused or self._seek_requested is None):
+                    self._sync_position(offset)
                 continue
 
             if events:
@@ -469,14 +484,24 @@ class TCodePlaybackController:
                 target_deadline = self._base_real + final_target / self.speed
                 while monotonic() < target_deadline:
                     with self._condition:
-                        if self._stop_requested or self._seek_requested is not None or self._paused:
+                        if self._stop_requested:
                             restart = True
+                            restart_sync = False
+                            break
+                        if self._seek_requested is not None:
+                            restart = True
+                            restart_sync = True
+                            break
+                        if self._paused:
+                            restart = True
+                            restart_sync = False
                             break
                     sleep(min(0.02, max(0.0, target_deadline - monotonic())))
                 if restart:
                     offset = self.position
                     self.device.stop()
-                    self._sync_position(offset)
+                    if restart_sync:
+                        self._sync_position(offset)
                     continue
 
             with self._condition:
