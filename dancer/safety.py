@@ -45,6 +45,10 @@ class AxisLink:
             raise ValueError("axis link source and target must differ")
         if self.mode not in ("position", "velocity"):
             raise ValueError("axis link mode must be position or velocity")
+        if not np.isfinite(self.gain):
+            raise ValueError("axis link gain must be finite")
+        if not np.isfinite(self.delay_ms):
+            raise ValueError("axis link delay must be finite")
         if not 0.0 <= float(self.smoothing) <= 1.0:
             raise ValueError("axis link smoothing must be within 0..1")
 
@@ -76,6 +80,12 @@ class SafetySettings:
             raise ValueError(f"unknown smart-limit profile: {self.profile}")
         if self.gap_fill not in ("none", "ambient", "beat", "repeat"):
             raise ValueError(f"unknown gap-fill mode: {self.gap_fill}")
+        if int(self.soft_start_ms) < 0:
+            raise ValueError("soft_start_ms must be non-negative")
+        if int(self.home_ms) < 50:
+            raise ValueError("home_ms must be at least 50 ms")
+        if not np.isfinite(self.gap_threshold) or float(self.gap_threshold) <= 0:
+            raise ValueError("gap_threshold must be positive and finite")
 
     def to_dict(self):
         return {
@@ -88,6 +98,10 @@ class SafetySettings:
             "gap_threshold": float(self.gap_threshold),
             "links": [link.to_dict() for link in self.links],
         }
+
+
+def _limits(axis: str) -> tuple[float, float]:
+    return (400.0, 2400.0) if axis == "L0" else SECONDARY_LIMITS[axis]
 
 
 def _axis_grid(plan: Mapping[str, Sequence[tuple[float, float]]], *, duration: float | None = None, hz: float = 20.0):
@@ -124,15 +138,18 @@ def risk_heatmap(plan, *, duration: float | None = None, bins: int = 80):
     if times[-1] <= 0:
         return np.zeros(bins, dtype=np.float64)
     axis_risk = []
+    normalized_velocity = []
     for axis in AXIS_ORDER:
         value = values[axis]
         velocity = np.gradient(value, times, edge_order=1)
         acceleration = np.gradient(velocity, times, edge_order=1)
-        speed_limit, accel_limit = ((400.0, 2400.0) if axis == "L0" else SECONDARY_LIMITS[axis])
+        speed_limit, accel_limit = _limits(axis)
         excursion = np.abs(value - 50.0) / 50.0
         local = .22 * excursion + .43 * np.abs(velocity) / speed_limit + .35 * np.abs(acceleration) / accel_limit
         axis_risk.append(local)
+        normalized_velocity.append(np.abs(velocity) / speed_limit)
     combined = np.max(np.vstack(axis_risk), axis=0)
+    combined += .15 * np.clip(np.sum(np.vstack(normalized_velocity), axis=0) / 2.6, 0.0, 1.5)
     combined += .22 * np.clip((np.abs(values["L2"] - 50.0) + np.abs(values["R1"] - 50.0) - 50.0) / 50.0, 0.0, 1.0)
     combined += .16 * np.clip((np.abs(values["L1"] - 50.0) + np.abs(values["R2"] - 50.0) - 50.0) / 50.0, 0.0, 1.0)
     edges = np.linspace(0.0, times[-1], bins + 1)
@@ -143,6 +160,23 @@ def risk_heatmap(plan, *, duration: float | None = None, bins: int = 80):
     return np.clip(np.asarray(result, dtype=np.float64), 0.0, 1.5)
 
 
+def _normalized_velocity_load(plan, at: float, span: float = 0.06) -> float:
+    """Approximate simultaneous six-axis velocity as a sum of limit fractions."""
+    left = max(0.0, float(at) - span)
+    right = float(at) + span
+    dt = max(right - left, 1e-6)
+    load = 0.0
+    for axis in AXIS_ORDER:
+        actions = plan.get(axis, ())
+        if not actions:
+            continue
+        speed_limit, _ = _limits(axis)
+        before = sample_axis(actions, left, 50.0)
+        after = sample_axis(actions, right, 50.0)
+        load += abs(after - before) / dt / max(speed_limit, 1e-9)
+    return float(load)
+
+
 def apply_smart_limits(plan, profile: SmartLimitProfile | str = "balanced"):
     if isinstance(profile, str):
         profile = SMART_LIMIT_PRESETS[profile]
@@ -150,7 +184,7 @@ def apply_smart_limits(plan, profile: SmartLimitProfile | str = "balanced"):
     timeline = sorted({float(at) for actions in result.values() for at, _ in actions})
     if not timeline:
         return result
-    # Modify only existing target keyframes to preserve timing and editing intent.
+    # Modify only existing target keyframes to preserve editor timing intent.
     for axis in AXIS_ORDER:
         if not result[axis]:
             continue
@@ -170,6 +204,16 @@ def apply_smart_limits(plan, profile: SmartLimitProfile | str = "balanced"):
                 if total > profile.sway_roll_budget:
                     scale = profile.sway_roll_budget / max(total, 1e-9)
                     value = 50.0 + (value - 50.0) * scale
+
+            # Budget simultaneous velocity as a fraction of each axis' own
+            # speed limit. The anchor is the immediately preceding sampled pose,
+            # so only the current step is softened and keyframe timing stays put.
+            velocity_load = _normalized_velocity_load(result, at)
+            if velocity_load > profile.simultaneous_velocity_budget:
+                scale = profile.simultaneous_velocity_budget / max(velocity_load, 1e-9)
+                anchor = sample_axis(result[axis], max(0.0, at - .06), value)
+                value = anchor + (value - anchor) * scale
+
             adjusted.append((at, float(np.clip(value, 0.0, 100.0))))
         result[axis] = adjusted
     return result
@@ -253,17 +297,26 @@ def fill_motion_gaps(plan, beats: Sequence[float], *, mode: str = "ambient", thr
 
 
 def add_soft_start(plan, start_at: float, *, duration_ms: int = 750, neutral: float = 50.0):
-    """Prepend a neutral-to-script-start ramp without changing later keyframes."""
+    """Add a neutral-to-selected-pose ramp for offline/live helpers.
+
+    When the selected time is too close to zero to fit the ramp, future
+    keyframes are shifted forward just enough to preserve a real non-zero ramp.
+    Live TCode/Intiface paths normally perform their own transport-level ramp.
+    """
     result = copy_plan(plan)
     ramp = max(0.05, int(duration_ms) / 1000.0)
     start_at = max(0.0, float(start_at))
+    shift = max(0.0, ramp - start_at)
     for axis in AXIS_ORDER:
         if not result[axis]:
             continue
         target = sample_axis(result[axis], start_at, neutral)
-        before = max(0.0, start_at - ramp)
-        retained = [(at, pos) for at, pos in result[axis] if at >= start_at]
-        result[axis] = sorted([(before, float(neutral)), (start_at, target), *retained], key=lambda item: item[0])
+        retained = [(at + shift, pos) for at, pos in result[axis] if at >= start_at]
+        ramp_end = start_at + shift
+        result[axis] = sorted(
+            [(max(0.0, ramp_end - ramp), float(neutral)), (ramp_end, target), *retained],
+            key=lambda item: item[0],
+        )
     return result
 
 
