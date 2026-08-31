@@ -2,8 +2,6 @@ name: macOS build
 
 on:
   push:
-    branches: ["master", "feat/**"]
-  pull_request:
     branches: ["master"]
   workflow_dispatch:
 
@@ -36,9 +34,12 @@ jobs:
       - name: Install FFmpeg
         shell: bash
         run: |
-          brew update
           brew install ffmpeg
           ffmpeg -version | head -n 1
+
+      - name: Install Intel scientific compatibility wheels
+        if: matrix.arch == 'x86_64'
+        run: python -m pip install --only-binary=:all: "numba==0.61.2" "llvmlite==0.44.0"
 
       - name: Install Python dependencies
         run: python -m pip install -e '.[build,test]'
