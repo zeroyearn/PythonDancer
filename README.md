@@ -1,28 +1,47 @@
-# PythonDancer 2
+# PythonDancer 2.2
 
-PythonDancer turns audio or video soundtracks into `.funscript` motion. This fork keeps the original GUI/CLI workflow, replaces the core mapping with a beat-aware motion engine, and adds an SR6/OSR6-style six-axis planner plus TCode v0.3 device playback.
+PythonDancer turns audio or video soundtracks into single- or six-axis `.funscript` motion and can stream the generated six-axis motion directly to TCode v0.3 devices.
+
+This fork keeps the original workflow but replaces the old amplitude mapping with a beat-aware planner, adds SR6/OSR6 six-axis motion, a musical choreography engine, D2-aware TCode playback, and a seekable device timeline.
 
 > Upstream: `NodudeWasTaken/PythonDancer`, itself a Python port of `ncdxncdx/FunscriptDancer`.
 
-## What changed
+## Releases
 
-### 2.0: beat-aware single-axis engine
+### 2.0 — beat-aware L0
 
-- beat-aligned feature extraction with the original segmentation off-by-one fixed;
-- safe normalization for silent/constant/invalid feature windows;
-- onset, bass/mid/high spectral energy, harmonic and percussive features;
-- an adaptive L0 motion planner;
-- automatic `1x / 2x / 4x` beat subdivision;
-- velocity, acceleration and minimum-action-interval constraints;
-- `adaptive` and `legacy` planners for A/B comparison;
-- corrected automap, heatmap wiring and module entry point;
-- modern Python packaging and regression tests.
+- beat-aligned audio features;
+- safe normalization;
+- onset, bass/mid/high, pitch, harmonic and percussive features;
+- adaptive `1x / 2x / 4x` subdivision;
+- speed / acceleration / minimum-interval constraints;
+- corrected automap, heatmap and module entry point;
+- `adaptive` and `legacy` planners for A/B testing.
 
-### 2.1: six-axis motion + TCode
+### 2.1 — six-axis + TCode
 
-The multi-axis planner generates the standard SR6/OSR6 axis set: `L0` stroke, `L1` surge, `L2` sway, `R0` twist, `R1` roll and `R2` pitch. L0 stays on the V2 adaptive planner; secondary axes share its timing skeleton but use different rhythmic/spectral feature mixes and physical limits instead of mirroring L0.
+- L0 stroke, L1 surge, L2 sway, R0 twist, R1 roll, R2 pitch;
+- MultiFunPlayer-style six-file funscript bundles;
+- TCode v0.3 export and serial playback;
+- D0/D1/D2 device probing;
+- D2 min/max range mapping and unsupported-axis filtering;
+- Play / Pause / Resume / Seek / DSTOP;
+- dedicated six-axis GUI.
 
-TCode v0.3 output maps normalized positions to device ranges, combines active axes in one newline-delimited command, and uses `I<milliseconds>` ramp intervals so targets are sent ahead of arrival time.
+### 2.2 — musical choreography
+
+The default secondary-axis planner is now a choreography engine instead of a fixed reactive formula set.
+
+It adds:
+
+- continuous beat / bar / phrase phase;
+- phrase-aligned section detection: `intro`, `verse`, `build`, `chorus`, `drop`, `breakdown`, `outro`;
+- reusable multi-axis gestures: `pulse`, `sway`, `rock`, `circle`, `spiral`, `wave`, `accent`;
+- section-dependent gesture selection and gain;
+- explicit cross-axis coupling for coherent 6D poses;
+- `balanced`, `rhythm`, and `expressive` gesture styles;
+- `reactive` compatibility mode for A/B comparison;
+- choreography structure stored in funscript metadata and `.motion.json`.
 
 ## Install
 
@@ -42,7 +61,7 @@ pip install -e '.[test]'
 python -m pytest
 ```
 
-FFmpeg is recommended for media containers. `pyserial` is included for TCode serial playback.
+FFmpeg is recommended for media containers. `pyserial` is included for serial TCode playback.
 
 ## Run
 
@@ -52,27 +71,221 @@ Single-axis GUI:
 python -m dancer
 ```
 
-Single-axis CLI:
-
-```bash
-python -m dancer song.mp3 --cli --yes
-```
-
-Six-axis GUI:
+Six-axis choreography GUI:
 
 ```bash
 python -m dancer scene.mp4 --multiaxis
 ```
 
-The six-axis GUI previews all channels and includes preset/strength controls, TCode export, serial-port discovery, D2 device probing, live playback, a seekable timeline, Pause/Resume, and `DSTOP`.
-
-## Six-axis / SR6 output
+Six-axis CLI:
 
 ```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis --multiaxis_preset balanced
+python -m dancer scene.mp4 --cli --yes --multiaxis
 ```
 
-Default bundle names:
+## Choreography architecture
+
+```text
+Audio / video soundtrack
+        │
+        ├─ beat / tempo / PLP
+        ├─ RMS energy
+        ├─ onset
+        ├─ bass / mid / high
+        ├─ pitch
+        ├─ harmonic
+        └─ percussive
+        │
+        ▼
+Beat-aligned feature stream
+        │
+        ├──────────────► L0 adaptive planner
+        │                    │
+        │                    ▼
+        │              L0 action timeline
+        │
+        ▼
+Musical Grid
+  beat phase
+  bar phase
+  phrase phase
+        │
+        ▼
+Section Analyzer
+  intro / verse / build / chorus
+  drop / breakdown / outro
+        │
+        ▼
+Gesture Planner
+  pulse / sway / rock / circle
+  spiral / wave / accent
+        │
+        ▼
+6D Pose Synthesis
+  L1 / L2 / R0 / R1 / R2
+        │
+        ▼
+Cross-axis coupling
+        │
+        ▼
+Per-axis physical constraints
+        │
+        ▼
+Funscript bundle / TCode
+```
+
+L0 still owns the action timestamps. The choreography engine evaluates beat/bar/phrase phase and musical sections on that timeline, then creates coordinated secondary-axis poses.
+
+## Musical phase
+
+The old 2.1 secondary planner used an action-index phase such as `action_index × π`. 2.2 uses the actual beat timestamps instead.
+
+The engine maintains three continuous coordinates:
+
+```text
+beat_phase    position inside one beat
+bar_phase     position inside one bar
+phrase_phase  position inside a multi-bar phrase
+```
+
+Default grid:
+
+```text
+beats_per_bar   = 4
+bars_per_phrase = 4
+section_bars    = 4
+```
+
+Override from CLI:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --beats_per_bar 4 \
+  --bars_per_phrase 4 \
+  --section_bars 4
+```
+
+## Section detection
+
+Section detection is a deterministic musical-intent heuristic, not a semantic ML classifier. It compares phrase-window energy, rhythmic activity, novelty, and within-window dynamics.
+
+Typical output:
+
+```text
+intro → verse → build → drop → verse → chorus → breakdown → chorus → outro
+```
+
+Show the detected structure:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis --show_sections
+```
+
+The GUI shows the same structure after generation.
+
+## Gesture primitives
+
+The choreography engine blends reusable multi-axis gestures instead of calculating every axis independently.
+
+### `pulse`
+
+Beat-driven rotational/accent motion. Strongest contribution is usually R0 with smaller L1/L2/R1/R2 support.
+
+### `sway`
+
+Bar-scale left/right movement. L2 and R1 are deliberately counter-coupled.
+
+### `rock`
+
+Forward/back movement: L1 and R2 move as a coupled pair.
+
+### `circle`
+
+L1/L2 use quadrature phase to create a circular translation pattern while R1/R2 follow the pose.
+
+### `spiral`
+
+Phrase-scale twist with slower L2/R2 support. Used more heavily in chorus/drop and expressive mode.
+
+### `wave`
+
+Slow phrase motion dominated by R1/R2. Favored in intro/breakdown/outro.
+
+### `accent`
+
+Transient, alternating-direction motion driven by onset/percussive energy. Favored in rhythm and drop sections.
+
+## Section choreography
+
+Different sections choose different gesture mixtures and amplitude gains.
+
+Examples:
+
+```text
+intro       wave + rock, reduced gain
+verse       sway + rock + light pulse
+build       circle + pulse + spiral, rising activity
+chorus      circle + spiral + sway
+DROP        pulse + spiral + accent, highest gain
+breakdown   wave + rock, reduced gain
+outro       slow wave / sway, reduced gain
+```
+
+This is why 2.2 no longer looks like five unrelated audio-reactive curves.
+
+## Cross-axis coupling
+
+After gesture blending, the engine explicitly coordinates related axes:
+
+```text
+L2 sway   <-> R1 counter-roll
+L1 surge  <-> R2 counter-pitch
+L0 stroke -> R0 twist support
+bass/L0   -> small L1 correction
+```
+
+The final five secondary signals are smoothed and then passed through the existing speed/acceleration constraint layer.
+
+## Choreography controls
+
+Default mode:
+
+```text
+--choreography_mode choreography
+```
+
+A/B against the previous 2.1 formulas:
+
+```bash
+python -m dancer scene.mp4 --cli --yes --multiaxis \
+  --choreography_mode reactive
+```
+
+Gesture contribution:
+
+```text
+--gesture_strength 1.0
+```
+
+`0` keeps only the low-level reactive contribution inside choreography mode; values above `1` emphasize the gesture layer.
+
+Presets:
+
+```text
+balanced    general-purpose 6D motion
+rhythm      stronger pulse/accent/percussion response
+expressive  stronger circle/spiral/wave movement
+```
+
+Global secondary-axis amplitude remains controlled by:
+
+```text
+--axis_strength 1.0
+```
+
+## Six-axis output
+
+Default files:
 
 ```text
 scene.funscript          L0 / stroke
@@ -81,30 +294,17 @@ scene.sway.funscript     L2 / sway
 scene.twist.funscript    R0 / twist
 scene.roll.funscript     R1 / roll
 scene.pitch.funscript    R2 / pitch
-scene.motion.json        bundle manifest
+scene.motion.json        bundle/choreography manifest
 ```
 
-Presets: `balanced`, `rhythm`, `expressive`. `--axis_strength` scales L1/L2/R0/R1/R2 only.
+The manifest includes the generation metadata and detected section summary so a bundle can be inspected later.
 
 ## TCode v0.3 device layer
 
-Export a scheduled TCode script:
+Export TCode:
 
 ```bash
 python -m dancer scene.mp4 --cli --yes --multiaxis --tcode
-```
-
-Each non-comment `.tcode` line uses:
-
-```text
-send_at_ms<TAB>TCode command
-```
-
-Example:
-
-```text
-0       L01234I250 L15000I250 L25000I250 R05000I250 R15000I250 R25000I250
-250     L08765I250 L15200I250 L24800I250 R06000I250 R14500I250 R25500I250
 ```
 
 Preview without hardware:
@@ -113,25 +313,25 @@ Preview without hardware:
 python -m dancer scene.mp4 --cli --yes --multiaxis --tcode_preview 5
 ```
 
-List ports:
+List serial ports:
 
 ```bash
 python -m dancer --cli --list_ports
 ```
 
-Probe one device without generating motion:
+Probe a device:
 
 ```bash
 python -m dancer --cli --serial_port COM4 --device_info
 ```
 
-Live serial playback:
+Live playback:
 
 ```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis --serial_port /dev/ttyUSB0 --baud 115200
+python -m dancer scene.mp4 --cli --yes --multiaxis --serial_port COM4
 ```
 
-Start at a specific timeline position:
+Start at a timeline point:
 
 ```bash
 python -m dancer scene.mp4 --cli --yes --multiaxis \
@@ -139,34 +339,18 @@ python -m dancer scene.mp4 --cli --yes --multiaxis \
   --start_at 42.5
 ```
 
-Key flags:
+## D2 range mapping
 
-```text
---serial_port PORT
---baud 115200
---serial_timeout 0.25
---play_speed 1.0
---start_at SECONDS
---seek_ramp_ms 120
---no_device_ranges
---device_info
---tcode_preview N
---tcode
---tcode_out PATH
-```
-
-Before playback PythonDancer sends `D0`, `D1` and `D2`. `Ctrl+C` in CLI playback or the GUI **STOP** button sends `DSTOP`.
-
-### D2 axis range auto-mapping
-
-TCode devices commonly report D2 rows in this form:
+Devices may report:
 
 ```text
 L0 1000 9000 Up
 R0 2000 8000 Twist
 ```
 
-PythonDancer parses these saved device preferences and, by default, maps its normalized `0..100` motion into each reported range. It also sends only generated axes that the device actually reports. For the example above:
+PythonDancer maps normalized `0..100` motion into each saved device range and only emits axes reported by D2.
+
+Example:
 
 ```text
 L0 0%   -> 1000
@@ -174,27 +358,41 @@ L0 50%  -> 5000
 L0 100% -> 9000
 ```
 
-This is a profile/range mapping step; it does **not** physically drive the mechanism into end stops. Use `--no_device_ranges` or uncheck **Use D2 ranges** in the GUI to force the full `0000..9999` command range.
+This is profile mapping only; it does not physically seek hardware end stops.
 
-### Scheduling model
+Disable D2 mapping with:
 
-For target `t[n]`, PythonDancer sends the frame at `t[n-1]` with `I=(t[n]-t[n-1])` milliseconds. All active axes are placed on one line and committed by one newline, so the device ramps toward the next synchronized target during the interval.
+```text
+--no_device_ranges
+```
 
-### Pause / Resume / Seek
+## Pause / Resume / Seek
 
-The six-axis GUI contains a live timeline slider:
+The GUI playback controller supports:
 
-- **Pause** records the current timeline point and sends `DSTOP`. No additional position command is sent while paused.
-- **Resume** synchronizes the device to the frozen timeline position using `--seek_ramp_ms`, then rebuilds future ramp-ahead events from that point.
-- **Seek** can be used during playback or while paused. Releasing the timeline slider sends `DSTOP`, maps all active axes to the selected timestamp, ramps to that pose, and rebuilds the remaining schedule.
-- **STOP** terminates playback and sends `DSTOP`.
+- **Pause** — captures timeline time and sends `DSTOP`; no position frame is emitted while paused.
+- **Resume** — synchronizes to the frozen pose and rebuilds future ramp-ahead events.
+- **Seek** — `DSTOP`, move to the selected pose using the configured seek ramp, then rebuild future events.
+- **STOP** — terminate playback and send `DSTOP`.
 
-The playback controller is also exposed through Python as `TCodePlaybackController` for external player integrations.
+The controller is exposed as `TCodePlaybackController` for other player integrations.
 
 ## Physical limits
 
-L0 defaults to `400` normalized units/s, `2400` units/s² and minimum interval `0.02s`. Secondary axes use lower axis-specific limits before export. All generated scripts remain normalized to `0..100`; the device layer performs the final TCode range mapping.
+L0 defaults to:
 
-## Output compatibility
+```text
+max speed         400 normalized units/s
+max acceleration  2400 units/s²
+minimum interval  0.02 s
+```
 
-Single-axis `.funscript` stays standard. Six-axis output is separate MultiFunPlayer-style files plus optional `.motion.json`. The `.tcode` file is PythonDancer's host schedule; the command portion of each line is standard TCode v0.3 ASCII.
+Secondary defaults:
+
+```text
+L1/L2  180 units/s, 1000 units/s²
+R0     300 units/s, 1800 units/s²
+R1/R2  200 units/s, 1200 units/s²
+```
+
+All planner output remains normalized to `0..100`; the TCode layer performs final device-range mapping.
