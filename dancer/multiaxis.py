@@ -8,6 +8,7 @@ from typing import Mapping
 
 import numpy as np
 
+from .choreography import ChoreographyAnalysis, detect_sections, synthesize_choreography_signals
 from .features import safe_normalize
 from .motion import MotionConfig, apply_constraints, plan_motion
 
@@ -54,20 +55,31 @@ _PRESET_AMPLITUDES = {
 
 @dataclass(frozen=True)
 class MultiAxisConfig:
-    """Configuration for six-axis planning in normalized 0..100 space."""
+    """Configuration for synchronized six-axis planning in normalized 0..100 space."""
 
     motion: MotionConfig = field(default_factory=MotionConfig)
     preset: str = "balanced"
     strength: float = 1.0
     neutral: float = 50.0
+    mode: str = "choreography"
+    gesture_strength: float = 1.0
+    beats_per_bar: int = 4
+    bars_per_phrase: int = 4
+    section_bars: int = 4
 
     def __post_init__(self):
         if self.preset not in _PRESET_AMPLITUDES:
             raise ValueError(f"unknown multi-axis preset: {self.preset}")
+        if self.mode not in ("choreography", "reactive"):
+            raise ValueError("mode must be 'choreography' or 'reactive'")
         if not np.isfinite(self.strength) or self.strength < 0:
             raise ValueError("strength must be a finite non-negative number")
+        if not np.isfinite(self.gesture_strength) or self.gesture_strength < 0:
+            raise ValueError("gesture_strength must be a finite non-negative number")
         if not np.isfinite(self.neutral):
             raise ValueError("neutral must be finite")
+        if self.beats_per_bar <= 0 or self.bars_per_phrase <= 0 or self.section_bars <= 0:
+            raise ValueError("musical grid values must be positive")
 
 
 def _feature(data: Mapping, name: str, length: int, fallback: str | None = None) -> np.ndarray:
@@ -87,7 +99,6 @@ def _interp_feature(beat_times: np.ndarray, beat_values: np.ndarray, action_time
         return np.asarray([], dtype=np.float64)
     if beat_times.size == 0 or beat_values.size == 0:
         return np.zeros(action_times.size, dtype=np.float64)
-
     count = min(beat_times.size, beat_values.size)
     x = np.asarray(beat_times[:count], dtype=np.float64)
     y = safe_normalize(beat_values[:count])
@@ -95,7 +106,6 @@ def _interp_feature(beat_times: np.ndarray, beat_values: np.ndarray, action_time
     x, y = x[finite], y[finite]
     if x.size == 0:
         return np.zeros(action_times.size, dtype=np.float64)
-
     x, unique_indices = np.unique(x, return_index=True)
     y = y[unique_indices]
     if x.size == 1:
@@ -107,10 +117,10 @@ def _signed(values: np.ndarray) -> np.ndarray:
     return np.clip(2.0 * values - 1.0, -1.0, 1.0)
 
 
-def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, config: MultiAxisConfig) -> dict[str, np.ndarray]:
+def _reactive_signals(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, preset: str) -> dict[str, np.ndarray]:
+    """Original PythonDancer 2.1 procedural secondary-axis formulas."""
     beats = np.asarray(data.get("beats", []), dtype=np.float64).reshape(-1)
     length = beats.size
-
     energy = _interp_feature(beats, _feature(data, "energy", length), action_times)
     onset = _interp_feature(beats, _feature(data, "onset", length, "energy"), action_times)
     bass = _interp_feature(beats, _feature(data, "bass", length, "energy"), action_times)
@@ -128,66 +138,61 @@ def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np
     stroke = np.clip((l0_positions - 50.0) / 50.0, -1.0, 1.0)
     activity = np.clip(0.55 * onset + 0.45 * percussive, 0.0, 1.0)
     pitch_trend = np.gradient(pitch) if n > 1 else np.zeros(n, dtype=np.float64)
+    bass_s, mid_s, high_s = _signed(bass), _signed(mid), _signed(high)
+    pitch_s, harmonic_s, perc_s = _signed(pitch), _signed(harmonic), _signed(percussive)
 
-    bass_s = _signed(bass)
-    mid_s = _signed(mid)
-    high_s = _signed(high)
-    pitch_s = _signed(pitch)
-    harmonic_s = _signed(harmonic)
-    perc_s = _signed(percussive)
+    surge = 0.46 * np.sin(phase * 0.50 + 0.35 * bass_s) + 0.29 * bass_s + 0.15 * harmonic_s + 0.10 * stroke
+    sway = 0.48 * np.sin(phase * 0.75 + np.pi / 2.0) * (0.55 + 0.45 * activity) + 0.24 * high_s + 0.18 * mid_s + 0.10 * np.tanh(pitch_trend * 4.0)
+    twist = 0.44 * np.sin(phase * 0.50 + np.pi / 2.0) + 0.34 * pitch_s + 0.14 * high_s + 0.08 * stroke
+    roll = -0.42 * np.sin(phase * 0.75 + np.pi / 2.0) + 0.28 * perc_s + 0.18 * stroke + 0.12 * high_s
+    pitch_axis = 0.46 * np.sin(phase * 0.25) + 0.30 * harmonic_s + 0.14 * pitch_s + 0.10 * np.tanh(pitch_trend * 5.0)
 
-    surge = (
-        0.46 * np.sin(phase * 0.50 + 0.35 * bass_s)
-        + 0.29 * bass_s
-        + 0.15 * harmonic_s
-        + 0.10 * stroke
-    )
-    sway = (
-        0.48 * np.sin(phase * 0.75 + np.pi / 2.0) * (0.55 + 0.45 * activity)
-        + 0.24 * high_s
-        + 0.18 * mid_s
-        + 0.10 * np.tanh(pitch_trend * 4.0)
-    )
-    twist = (
-        0.44 * np.sin(phase * 0.50 + np.pi / 2.0)
-        + 0.34 * pitch_s
-        + 0.14 * high_s
-        + 0.08 * stroke
-    )
-    roll = (
-        -0.42 * np.sin(phase * 0.75 + np.pi / 2.0)
-        + 0.28 * perc_s
-        + 0.18 * stroke
-        + 0.12 * high_s
-    )
-    pitch_axis = (
-        0.46 * np.sin(phase * 0.25)
-        + 0.30 * harmonic_s
-        + 0.14 * pitch_s
-        + 0.10 * np.tanh(pitch_trend * 5.0)
-    )
-
-    if config.preset == "rhythm":
+    if preset == "rhythm":
         surge = 0.75 * surge + 0.25 * bass_s
         sway = 0.65 * sway + 0.35 * perc_s
         twist = 0.75 * twist + 0.25 * perc_s
         roll = 0.60 * roll + 0.40 * perc_s
         pitch_axis *= 0.8
-    elif config.preset == "expressive":
+    elif preset == "expressive":
         surge = 0.85 * surge + 0.15 * harmonic_s
         sway = 0.85 * sway + 0.15 * pitch_s
         twist = 0.75 * twist + 0.25 * pitch_s
         roll = 0.85 * roll + 0.15 * mid_s
         pitch_axis = 0.75 * pitch_axis + 0.25 * harmonic_s
+    return {"L1": surge, "L2": sway, "R0": twist, "R1": roll, "R2": pitch_axis}
 
-    signals = {"L1": surge, "L2": sway, "R0": twist, "R1": roll, "R2": pitch_axis}
+
+def analyze_multiaxis(data: Mapping, config: MultiAxisConfig) -> ChoreographyAnalysis:
+    """Return phrase-aligned section analysis used by choreography mode."""
+    return detect_sections(
+        data,
+        beats_per_bar=config.beats_per_bar,
+        bars_per_phrase=config.bars_per_phrase,
+        section_bars=config.section_bars,
+    )
+
+
+def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, config: MultiAxisConfig) -> dict[str, np.ndarray]:
+    if config.mode == "choreography":
+        signals, _ = synthesize_choreography_signals(
+            data,
+            action_times,
+            l0_positions,
+            preset=config.preset,
+            gesture_strength=config.gesture_strength,
+            beats_per_bar=config.beats_per_bar,
+            bars_per_phrase=config.bars_per_phrase,
+            section_bars=config.section_bars,
+        )
+    else:
+        signals = _reactive_signals(data, action_times, l0_positions, config.preset)
+
     amplitudes = _PRESET_AMPLITUDES[config.preset]
     neutral = float(np.clip(config.neutral, 0.0, 100.0))
     strength = float(config.strength)
-
     return {
-        axis: np.clip(neutral + amplitudes[axis] * strength * np.clip(signal, -1.0, 1.0), 0.0, 100.0)
-        for axis, signal in signals.items()
+        axis: np.clip(neutral + amplitudes[axis] * strength * np.clip(signals[axis], -1.0, 1.0), 0.0, 100.0)
+        for axis in AXIS_ORDER[1:]
     }
 
 
@@ -217,7 +222,6 @@ def validate_multiaxis(plan: Mapping[str, list[tuple[float, float]]]) -> None:
     missing = [axis for axis in AXIS_ORDER if axis not in plan]
     if missing:
         raise ValueError(f"missing axes: {', '.join(missing)}")
-
     for axis in AXIS_ORDER:
         previous_at = -1.0
         for at, pos in plan[axis]:
@@ -259,7 +263,6 @@ def _funscript_payload(axis: str, actions: list[tuple[float, float]], metadata: 
 
 
 def bundle_paths(base_path: str | Path) -> dict[str, Path]:
-    """Return standard MultiFunPlayer-compatible paths for all six axes."""
     path = Path(base_path)
     text = str(path)
     prefix = text[: -len(".funscript")] if text.lower().endswith(".funscript") else text
@@ -267,10 +270,8 @@ def bundle_paths(base_path: str | Path) -> dict[str, Path]:
 
 
 def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple[float, float]]], *, metadata: Mapping | None = None, manifest: bool = True) -> dict[str, Path]:
-    """Write a six-axis funscript bundle and optional inspection manifest."""
     validate_multiaxis(plan)
     paths = bundle_paths(base_path)
-
     for axis, path in paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf8") as handle:
@@ -280,7 +281,7 @@ def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple
         l0_path = paths["L0"]
         manifest_path = l0_path.with_suffix(".motion.json")
         payload = {
-            "version": "1.0",
+            "version": "1.1",
             "axes": {
                 axis: {
                     "channel": AXIS_CHANNELS[axis],
@@ -294,5 +295,4 @@ def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple
         with manifest_path.open("w", encoding="utf8") as handle:
             dump(payload, handle, indent=2)
         paths["manifest"] = manifest_path
-
     return paths
