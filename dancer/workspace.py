@@ -266,7 +266,6 @@ class WorkspaceState:
                     result[axis] = []
         return result
 
-    # Backward-friendly alias for callers that want the exported/effective plan.
     effective_plan = output_plan
 
     def to_dict(self) -> dict[str, object]:
