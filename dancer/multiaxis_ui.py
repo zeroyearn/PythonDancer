@@ -1,4 +1,4 @@
-"""Tk GUI for six-axis PythonDancer planning, export, and TCode playback."""
+"""Tk GUI for six-axis choreography, export, and TCode playback."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 
 from .libfun import autoval, load_audio_data
 from .motion import MotionConfig
-from .multiaxis import AXIS_CHANNELS, AXIS_ORDER, MultiAxisConfig, export_funscript_bundle, plan_multiaxis
+from .multiaxis import AXIS_CHANNELS, AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, export_funscript_bundle, plan_multiaxis
 from .tcode import (
     SerialTCodeDevice,
     TCodePlaybackController,
@@ -30,6 +30,7 @@ class MultiAxisWindow(tk.Tk):
         self.args = args
         self.data = None
         self.plan = None
+        self.analysis = None
         self.source_path: Path | None = Path(args.audio_path) if args.audio_path else None
         self.worker: Thread | None = None
         self.device_worker: Thread | None = None
@@ -39,15 +40,21 @@ class MultiAxisWindow(tk.Tk):
         self.timeline_dragging = False
         self.duration = 0.0
 
-        self.title("PythonDancer - Six-axis planner")
-        self.geometry("1240x940")
-        self.minsize(1040, 760)
+        self.title("PythonDancer - Six-axis choreography")
+        self.geometry("1280x980")
+        self.minsize(1060, 800)
 
         self.path_var = tk.StringVar(value=str(self.source_path or ""))
         self.preset_var = tk.StringVar(value=args.multiaxis_preset)
         self.strength_var = tk.DoubleVar(value=args.axis_strength)
         self.subdivision_var = tk.IntVar(value=args.subdivision)
         self.automap_var = tk.BooleanVar(value=args.automap)
+        self.mode_var = tk.StringVar(value=args.choreography_mode)
+        self.gesture_strength_var = tk.DoubleVar(value=args.gesture_strength)
+        self.beats_per_bar_var = tk.IntVar(value=args.beats_per_bar)
+        self.bars_per_phrase_var = tk.IntVar(value=args.bars_per_phrase)
+        self.section_bars_var = tk.IntVar(value=args.section_bars)
+        self.section_summary_var = tk.StringVar(value="Structure: not analyzed")
         self.status_var = tk.StringVar(value="Select media and generate a six-axis plan.")
         self.port_var = tk.StringVar(value=args.serial_port or "")
         self.baud_var = tk.IntVar(value=args.baud)
@@ -89,8 +96,23 @@ class MultiAxisWindow(tk.Tk):
         self.export_button = ttk.Button(settings, text="Export bundle", command=self.export, state="disabled")
         self.export_button.grid(row=0, column=8)
 
+        choreography = ttk.LabelFrame(controls, text="Choreography engine", padding=8)
+        choreography.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        choreography.columnconfigure(10, weight=1)
+        ttk.Label(choreography, text="Mode").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(choreography, textvariable=self.mode_var, values=("choreography", "reactive"), state="readonly", width=13).grid(row=0, column=1, padx=(6, 16))
+        ttk.Label(choreography, text="Gesture").grid(row=0, column=2, sticky="w")
+        ttk.Spinbox(choreography, textvariable=self.gesture_strength_var, from_=0.0, to=3.0, increment=0.05, width=6).grid(row=0, column=3, padx=(6, 16))
+        ttk.Label(choreography, text="Beats/bar").grid(row=0, column=4, sticky="w")
+        ttk.Spinbox(choreography, textvariable=self.beats_per_bar_var, from_=1, to=12, increment=1, width=4).grid(row=0, column=5, padx=(6, 16))
+        ttk.Label(choreography, text="Bars/phrase").grid(row=0, column=6, sticky="w")
+        ttk.Spinbox(choreography, textvariable=self.bars_per_phrase_var, from_=1, to=16, increment=1, width=4).grid(row=0, column=7, padx=(6, 16))
+        ttk.Label(choreography, text="Section bars").grid(row=0, column=8, sticky="w")
+        ttk.Spinbox(choreography, textvariable=self.section_bars_var, from_=1, to=16, increment=1, width=4).grid(row=0, column=9, padx=(6, 16))
+        ttk.Label(choreography, textvariable=self.section_summary_var).grid(row=1, column=0, columnspan=11, sticky="ew", pady=(8, 0))
+
         device = ttk.LabelFrame(controls, text="TCode v0.3 device", padding=8)
-        device.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        device.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         device.columnconfigure(1, weight=1)
         device.columnconfigure(7, weight=1)
 
@@ -229,17 +251,23 @@ class MultiAxisWindow(tk.Tk):
             return
         try:
             strength = float(self.strength_var.get())
-            if strength < 0:
+            gesture_strength = float(self.gesture_strength_var.get())
+            beats_per_bar = int(self.beats_per_bar_var.get())
+            bars_per_phrase = int(self.bars_per_phrase_var.get())
+            section_bars = int(self.section_bars_var.get())
+            if strength < 0 or gesture_strength < 0 or min(beats_per_bar, bars_per_phrase, section_bars) <= 0:
                 raise ValueError
         except (tk.TclError, ValueError):
-            messagebox.showerror("PythonDancer", "Axis strength must be a non-negative number.")
+            messagebox.showerror("PythonDancer", "Strengths must be non-negative and musical-grid values must be positive integers.")
             return
 
         preset = self.preset_var.get()
+        mode = self.mode_var.get()
         subdivision = int(self.subdivision_var.get())
         automap = bool(self.automap_var.get())
         self.source_path = source
-        self.status_var.set("Analyzing audio and planning six axes...")
+        self.status_var.set("Analyzing musical structure and planning six axes...")
+        self.section_summary_var.set("Structure: analyzing...")
         for button in (self.generate_button, self.export_button, self.tcode_export_button, self.play_button):
             button.configure(state="disabled")
 
@@ -257,20 +285,31 @@ class MultiAxisWindow(tk.Tk):
                         opt=self.args.auto_mod - 1,
                         planner="adaptive",
                     )
-                config = MultiAxisConfig(motion=self._motion_config(pitch, energy, subdivision), preset=preset, strength=strength)
+                config = MultiAxisConfig(
+                    motion=self._motion_config(pitch, energy, subdivision),
+                    preset=preset,
+                    strength=strength,
+                    mode=mode,
+                    gesture_strength=gesture_strength,
+                    beats_per_bar=beats_per_bar,
+                    bars_per_phrase=bars_per_phrase,
+                    section_bars=section_bars,
+                )
+                analysis = analyze_multiaxis(data, config)
                 plan = plan_multiaxis(data, config)
                 if not plan["L0"]:
                     raise ValueError("No actions could be generated from this input")
-                self.after(0, lambda: self._generation_done(data, plan, pitch, energy))
+                self.after(0, lambda: self._generation_done(data, plan, analysis, config, pitch, energy))
             except Exception as exc:
                 self.after(0, lambda e=exc: self._generation_failed(e))
 
         self.worker = Thread(target=work, daemon=True)
         self.worker.start()
 
-    def _generation_done(self, data, plan, pitch, energy):
+    def _generation_done(self, data, plan, analysis, config, pitch, energy):
         self.data = data
         self.plan = plan
+        self.analysis = analysis
         self.duration = plan_duration(plan)
         for button in (self.generate_button, self.export_button, self.tcode_export_button, self.play_button):
             button.configure(state="normal")
@@ -278,6 +317,8 @@ class MultiAxisWindow(tk.Tk):
         self.timeline_var.set(float(np.clip(self.timeline_var.get(), 0.0, self.duration)))
         self._update_timeline_label()
 
+        summary = analysis.summary() if analysis else ""
+        self.section_summary_var.set(f"Structure: {summary or 'no sections detected'}")
         self.axes.clear()
         for axis in AXIS_ORDER:
             actions = plan[axis]
@@ -293,13 +334,17 @@ class MultiAxisWindow(tk.Tk):
 
         duration = float(data.get("at", 0.0) or self.duration)
         counts = "/".join(str(len(plan[axis])) for axis in AXIS_ORDER)
-        self.status_var.set(f"Ready — {duration:.1f}s, preset={self.preset_var.get()}, L0 pitch={pitch:.1f}, energy={energy:.2f}")
+        self.status_var.set(
+            f"Ready — {duration:.1f}s, mode={config.mode}, preset={config.preset}, "
+            f"gesture={config.gesture_strength:.2f}, L0 pitch={pitch:.1f}, energy={energy:.2f}"
+        )
         self.summary_label.configure(text=f"actions L0..R2: {counts}")
 
     def _generation_failed(self, exc: Exception):
         self.generate_button.configure(state="normal")
         for button in (self.export_button, self.tcode_export_button, self.play_button):
             button.configure(state="disabled")
+        self.section_summary_var.set("Structure: generation failed")
         self.status_var.set(f"Generation failed: {exc}")
         messagebox.showerror("PythonDancer", f"Generation failed:\n{exc}")
 
@@ -315,10 +360,17 @@ class MultiAxisWindow(tk.Tk):
         if not selected:
             return
         try:
+            summary = self.analysis.summary() if self.analysis else ""
             written = export_funscript_bundle(
                 selected,
                 self.plan,
-                metadata={"notes": f"planner=multiaxis; preset={self.preset_var.get()}; axis_strength={float(self.strength_var.get())}"},
+                metadata={
+                    "notes": (
+                        f"planner=multiaxis; mode={self.mode_var.get()}; preset={self.preset_var.get()}; "
+                        f"gesture_strength={float(self.gesture_strength_var.get())}; axis_strength={float(self.strength_var.get())}"
+                    ),
+                    "choreography_sections": summary,
+                },
                 manifest=not self.args.no_manifest,
             )
         except Exception as exc:
