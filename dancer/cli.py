@@ -5,7 +5,14 @@ from pathlib import Path
 from .libfun import autoval, create_actions, dump_csv, dump_funscript, load_audio_data, render_heatmap
 from .motion import MotionConfig
 from .multiaxis import MultiAxisConfig, AXIS_ORDER, bundle_paths, export_funscript_bundle, plan_multiaxis
-from .tcode import SerialTCodeDevice, build_tcode_events, default_tcode_path, export_tcode_script, list_serial_ports, play_tcode_events
+from .tcode import (
+    SerialTCodeDevice,
+    TCodePlaybackController,
+    build_tcode_events,
+    default_tcode_path,
+    export_tcode_script,
+    list_serial_ports,
+)
 from .util import cli_args, ffmpeg_check, ffmpeg_conv
 
 
@@ -25,45 +32,90 @@ def _requested_tcode_path(args, out_file: Path) -> Path | None:
     return None
 
 
+def _print_device_profile(profile) -> None:
+    firmware = " | ".join(profile.firmware) or "no D0 response"
+    version = " | ".join(profile.tcode) or "no D1 response"
+    print(f"Device: {firmware}")
+    print(f"Protocol: {version}")
+    if profile.axes:
+        print("D2 axes / saved ranges:")
+        for axis in sorted(profile.axes):
+            item = profile.axes[axis]
+            suffix = f" {item.name}" if item.name else ""
+            print(f"  {axis}: {item.minimum}..{item.maximum}{suffix}")
+    else:
+        print("D2 axes: no parseable axis rows; falling back to generated axes/full range.")
+
+
 def _handle_tcode(args, plan, out_file: Path, source: Path) -> int:
     requested = bool(args.tcode or args.tcode_out or args.tcode_preview > 0 or args.serial_port)
     if not requested:
         return 0
+
     events = build_tcode_events(plan)
     if not events:
         print("No TCode events could be generated.")
         return 2
+
     path = _requested_tcode_path(args, out_file)
     if path is not None:
         written = export_tcode_script(path, events, source=str(source))
         print(f"TCode script: {written} ({len(events)} scheduled frames)")
+
     if args.tcode_preview > 0:
         count = min(int(args.tcode_preview), len(events))
         print(f"TCode preview ({count}/{len(events)}):")
         for event in events[:count]:
             print(f"  {int(round(event.send_at * 1000)):>7} ms  {event.command}")
+
     if args.serial_port:
-        if args.play_speed <= 0:
-            print("--play_speed must be greater than zero.")
-            return 2
         print(f"Opening TCode serial device {args.serial_port} @ {args.baud}...")
         try:
             with SerialTCodeDevice(args.serial_port, baud=args.baud, timeout=args.serial_timeout) as device:
-                identity = device.identify()
-                firmware = " | ".join(identity["firmware"]) or "no D0 response"
-                version = " | ".join(identity["tcode"]) or "no D1 response"
-                print(f"Device: {firmware}")
-                print(f"Protocol: {version}")
-                print(f"Playing {len(events)} TCode frames at {args.play_speed:g}x. Ctrl+C sends DSTOP.")
+                profile = device.profile()
+                _print_device_profile(profile)
+                active = profile.active_motion_axes(plan)
+                if profile.axes:
+                    print("Playback axes: " + ", ".join(active or ("none",)))
+                    if not active:
+                        print("The device did not report any generated motion axes in D2.")
+                        return 2
+                calibration = "D2 range mapping" if not args.no_device_ranges else "full 0000..9999 range"
+                controller = TCodePlaybackController(
+                    plan,
+                    device,
+                    speed=args.play_speed,
+                    profile=profile,
+                    use_device_ranges=not args.no_device_ranges,
+                    seek_ramp_ms=args.seek_ramp_ms,
+                )
+                print(
+                    f"Playing from {args.start_at:.3f}s at {args.play_speed:g}x using {calibration}. "
+                    "Ctrl+C sends DSTOP."
+                )
                 try:
-                    play_tcode_events(events, device, speed=args.play_speed)
+                    controller.play(start_at=args.start_at)
                 except KeyboardInterrupt:
+                    controller.stop()
                     print("Playback interrupted; DSTOP sent.")
                     return 130
         except Exception as exc:
             print(f"TCode serial playback failed: {exc}")
             return 2
         print("TCode playback complete.")
+    return 0
+
+
+def _device_info(args) -> int:
+    if not args.serial_port:
+        print("--device_info requires --serial_port.")
+        return 2
+    try:
+        with SerialTCodeDevice(args.serial_port, baud=args.baud, timeout=args.serial_timeout) as device:
+            _print_device_profile(device.profile())
+    except Exception as exc:
+        print(f"Unable to query TCode device: {exc}")
+        return 2
     return 0
 
 
@@ -81,6 +133,9 @@ def cmd(args):
         for device, description in ports:
             print(f"  {device}: {description}")
         return 0
+
+    if args.device_info:
+        return _device_info(args)
 
     if not args.audio_path:
         print("No audio file specified!")
@@ -100,6 +155,12 @@ def cmd(args):
         return 2
     if args.play_speed <= 0:
         print("--play_speed must be greater than zero.")
+        return 2
+    if args.start_at < 0:
+        print("--start_at must be non-negative.")
+        return 2
+    if args.seek_ramp_ms < 0:
+        print("--seek_ramp_ms must be non-negative.")
         return 2
 
     out_file = Path(args.out_path) if args.out_path else audio_file.with_suffix(".csv" if args.csv else ".funscript")
@@ -139,19 +200,41 @@ def cmd(args):
         data = load_audio_data(audio_file, plp=not args.no_plp)
         if args.automap:
             print("Automapping...")
-            pitch, energy = autoval(data, tpi=args.auto_pitch, target_speed=args.auto_speed, v2above=args.auto_per / 100.0, opt=args.auto_mod - 1, planner=args.planner)
+            pitch, energy = autoval(
+                data,
+                tpi=args.auto_pitch,
+                target_speed=args.auto_speed,
+                v2above=args.auto_per / 100.0,
+                opt=args.auto_mod - 1,
+                planner=args.planner,
+            )
             args.pitch = pitch
             args.energy = energy
             print(f"Automap: pitch={pitch:.2f}, energy={energy:.2f}")
 
         if args.multiaxis:
             print(f"Creating six-axis motion ({args.multiaxis_preset})...")
-            motion = MotionConfig(energy_multiplier=float(args.energy), pitch_range=float(args.pitch), overflow=int(args.overflow), amplitude_centering=float(args.amplitude_centering), center_offset=float(args.center_offset), subdivision=int(args.subdivision), max_speed=float(args.max_speed), max_acceleration=float(args.max_acceleration), min_interval=float(args.min_interval))
+            motion = MotionConfig(
+                energy_multiplier=float(args.energy),
+                pitch_range=float(args.pitch),
+                overflow=int(args.overflow),
+                amplitude_centering=float(args.amplitude_centering),
+                center_offset=float(args.center_offset),
+                subdivision=int(args.subdivision),
+                max_speed=float(args.max_speed),
+                max_acceleration=float(args.max_acceleration),
+                min_interval=float(args.min_interval),
+            )
             plan = plan_multiaxis(data, MultiAxisConfig(motion=motion, preset=args.multiaxis_preset, strength=float(args.axis_strength)))
             if not plan["L0"]:
                 print("No actions could be generated from this input.")
                 return 2
-            written = export_funscript_bundle(out_file, plan, metadata={"notes": f"planner=multiaxis; preset={args.multiaxis_preset}; subdivision={args.subdivision}; axis_strength={args.axis_strength}"}, manifest=not args.no_manifest)
+            written = export_funscript_bundle(
+                out_file,
+                plan,
+                metadata={"notes": f"planner=multiaxis; preset={args.multiaxis_preset}; subdivision={args.subdivision}; axis_strength={args.axis_strength}"},
+                manifest=not args.no_manifest,
+            )
             print("Wrote multi-axis bundle:")
             for axis in AXIS_ORDER:
                 print(f"  {axis}: {written[axis]} ({len(plan[axis])} actions)")
@@ -159,7 +242,19 @@ def cmd(args):
                 print(f"  manifest: {written['manifest']}")
             if args.heatmap:
                 heatmap_file = written["L0"].with_stem(written["L0"].stem + "_heatmap").with_suffix(".png")
-                render_heatmap(data, args.energy, args.pitch, args.overflow, amplitude_centering=args.amplitude_centering, center_offset=args.center_offset, planner="adaptive", subdivision=args.subdivision, max_speed=args.max_speed, max_acceleration=args.max_acceleration, min_interval=args.min_interval).savefig(heatmap_file, bbox_inches="tight", pad_inches=0)
+                render_heatmap(
+                    data,
+                    args.energy,
+                    args.pitch,
+                    args.overflow,
+                    amplitude_centering=args.amplitude_centering,
+                    center_offset=args.center_offset,
+                    planner="adaptive",
+                    subdivision=args.subdivision,
+                    max_speed=args.max_speed,
+                    max_acceleration=args.max_acceleration,
+                    min_interval=args.min_interval,
+                ).savefig(heatmap_file, bbox_inches="tight", pad_inches=0)
                 print(f"L0 heatmap: {heatmap_file}")
             tcode_status = _handle_tcode(args, plan, written["L0"], Path(args.audio_path))
             if tcode_status:
@@ -168,7 +263,19 @@ def cmd(args):
             return 0
 
         print("Creating actions...")
-        actions = create_actions(data, energy_multiplier=args.energy, pitch_range=args.pitch, overflow=args.overflow, amplitude_centering=args.amplitude_centering, center_offset=args.center_offset, planner=args.planner, subdivision=args.subdivision, max_speed=args.max_speed, max_acceleration=args.max_acceleration, min_interval=args.min_interval)
+        actions = create_actions(
+            data,
+            energy_multiplier=args.energy,
+            pitch_range=args.pitch,
+            overflow=args.overflow,
+            amplitude_centering=args.amplitude_centering,
+            center_offset=args.center_offset,
+            planner=args.planner,
+            subdivision=args.subdivision,
+            max_speed=args.max_speed,
+            max_acceleration=args.max_acceleration,
+            min_interval=args.min_interval,
+        )
         if not actions:
             print("No actions could be generated from this input.")
             return 2
@@ -181,7 +288,19 @@ def cmd(args):
                 dump_funscript(handle, actions, metadata={"notes": f"planner={args.planner}; subdivision={args.subdivision}"})
         if args.heatmap:
             heatmap_file = out_file.with_stem(out_file.stem + "_heatmap").with_suffix(".png")
-            render_heatmap(data, args.energy, args.pitch, args.overflow, amplitude_centering=args.amplitude_centering, center_offset=args.center_offset, planner=args.planner, subdivision=args.subdivision, max_speed=args.max_speed, max_acceleration=args.max_acceleration, min_interval=args.min_interval).savefig(heatmap_file, bbox_inches="tight", pad_inches=0)
+            render_heatmap(
+                data,
+                args.energy,
+                args.pitch,
+                args.overflow,
+                amplitude_centering=args.amplitude_centering,
+                center_offset=args.center_offset,
+                planner=args.planner,
+                subdivision=args.subdivision,
+                max_speed=args.max_speed,
+                max_acceleration=args.max_acceleration,
+                min_interval=args.min_interval,
+            ).savefig(heatmap_file, bbox_inches="tight", pad_inches=0)
             print(f"Heatmap: {heatmap_file}")
         tcode_status = _handle_tcode(args, {"L0": actions}, out_file, Path(args.audio_path))
         if tcode_status:
