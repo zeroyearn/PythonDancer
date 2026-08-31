@@ -13,14 +13,7 @@ from .features import safe_normalize
 from .motion import MotionConfig, apply_constraints, plan_motion
 
 AXIS_ORDER = ("L0", "L1", "L2", "R0", "R1", "R2")
-AXIS_CHANNELS = {
-    "L0": "stroke",
-    "L1": "surge",
-    "L2": "sway",
-    "R0": "twist",
-    "R1": "roll",
-    "R2": "pitch",
-}
+AXIS_CHANNELS = {"L0": "stroke", "L1": "surge", "L2": "sway", "R0": "twist", "R1": "roll", "R2": "pitch"}
 AXIS_DESCRIPTIONS = {
     "L0": "Main linear stroke / up-down",
     "L1": "Forward-backward surge",
@@ -29,23 +22,8 @@ AXIS_DESCRIPTIONS = {
     "R1": "Side-to-side roll",
     "R2": "Forward-backward pitch",
 }
-FUNSCRIPT_SUFFIXES = {
-    "L0": "",
-    "L1": ".surge",
-    "L2": ".sway",
-    "R0": ".twist",
-    "R1": ".roll",
-    "R2": ".pitch",
-}
-
-SECONDARY_LIMITS = {
-    "L1": (180.0, 1000.0),
-    "L2": (180.0, 1000.0),
-    "R0": (300.0, 1800.0),
-    "R1": (200.0, 1200.0),
-    "R2": (200.0, 1200.0),
-}
-
+FUNSCRIPT_SUFFIXES = {"L0": "", "L1": ".surge", "L2": ".sway", "R0": ".twist", "R1": ".roll", "R2": ".pitch"}
+SECONDARY_LIMITS = {"L1": (180.0, 1000.0), "L2": (180.0, 1000.0), "R0": (300.0, 1800.0), "R1": (200.0, 1200.0), "R2": (200.0, 1200.0)}
 _PRESET_AMPLITUDES = {
     "balanced": {"L1": 17.0, "L2": 18.0, "R0": 30.0, "R1": 20.0, "R2": 19.0},
     "rhythm": {"L1": 14.0, "L2": 20.0, "R0": 24.0, "R1": 23.0, "R2": 15.0},
@@ -55,8 +33,6 @@ _PRESET_AMPLITUDES = {
 
 @dataclass(frozen=True)
 class MultiAxisConfig:
-    """Configuration for synchronized six-axis planning in normalized 0..100 space."""
-
     motion: MotionConfig = field(default_factory=MotionConfig)
     preset: str = "balanced"
     strength: float = 1.0
@@ -118,7 +94,6 @@ def _signed(values: np.ndarray) -> np.ndarray:
 
 
 def _reactive_signals(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, preset: str) -> dict[str, np.ndarray]:
-    """Original PythonDancer 2.1 procedural secondary-axis formulas."""
     beats = np.asarray(data.get("beats", []), dtype=np.float64).reshape(-1)
     length = beats.size
     energy = _interp_feature(beats, _feature(data, "energy", length), action_times)
@@ -129,7 +104,6 @@ def _reactive_signals(data: Mapping, action_times: np.ndarray, l0_positions: np.
     pitch = _interp_feature(beats, _feature(data, "pitch", length), action_times)
     harmonic = _interp_feature(beats, _feature(data, "harmonic", length, "pitch"), action_times)
     percussive = _interp_feature(beats, _feature(data, "percussive", length, "onset"), action_times)
-
     n = action_times.size
     if n == 0:
         return {axis: np.asarray([], dtype=np.float64) for axis in AXIS_ORDER[1:]}
@@ -140,13 +114,11 @@ def _reactive_signals(data: Mapping, action_times: np.ndarray, l0_positions: np.
     pitch_trend = np.gradient(pitch) if n > 1 else np.zeros(n, dtype=np.float64)
     bass_s, mid_s, high_s = _signed(bass), _signed(mid), _signed(high)
     pitch_s, harmonic_s, perc_s = _signed(pitch), _signed(harmonic), _signed(percussive)
-
     surge = 0.46 * np.sin(phase * 0.50 + 0.35 * bass_s) + 0.29 * bass_s + 0.15 * harmonic_s + 0.10 * stroke
     sway = 0.48 * np.sin(phase * 0.75 + np.pi / 2.0) * (0.55 + 0.45 * activity) + 0.24 * high_s + 0.18 * mid_s + 0.10 * np.tanh(pitch_trend * 4.0)
     twist = 0.44 * np.sin(phase * 0.50 + np.pi / 2.0) + 0.34 * pitch_s + 0.14 * high_s + 0.08 * stroke
     roll = -0.42 * np.sin(phase * 0.75 + np.pi / 2.0) + 0.28 * perc_s + 0.18 * stroke + 0.12 * high_s
     pitch_axis = 0.46 * np.sin(phase * 0.25) + 0.30 * harmonic_s + 0.14 * pitch_s + 0.10 * np.tanh(pitch_trend * 5.0)
-
     if preset == "rhythm":
         surge = 0.75 * surge + 0.25 * bass_s
         sway = 0.65 * sway + 0.35 * perc_s
@@ -163,13 +135,7 @@ def _reactive_signals(data: Mapping, action_times: np.ndarray, l0_positions: np.
 
 
 def analyze_multiaxis(data: Mapping, config: MultiAxisConfig) -> ChoreographyAnalysis:
-    """Return phrase-aligned section analysis used by choreography mode."""
-    return detect_sections(
-        data,
-        beats_per_bar=config.beats_per_bar,
-        bars_per_phrase=config.bars_per_phrase,
-        section_bars=config.section_bars,
-    )
+    return detect_sections(data, beats_per_bar=config.beats_per_bar, bars_per_phrase=config.bars_per_phrase, section_bars=config.section_bars)
 
 
 def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, config: MultiAxisConfig) -> dict[str, np.ndarray]:
@@ -186,35 +152,23 @@ def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np
         )
     else:
         signals = _reactive_signals(data, action_times, l0_positions, config.preset)
-
     amplitudes = _PRESET_AMPLITUDES[config.preset]
     neutral = float(np.clip(config.neutral, 0.0, 100.0))
     strength = float(config.strength)
-    return {
-        axis: np.clip(neutral + amplitudes[axis] * strength * np.clip(signals[axis], -1.0, 1.0), 0.0, 100.0)
-        for axis in AXIS_ORDER[1:]
-    }
+    return {axis: np.clip(neutral + amplitudes[axis] * strength * np.clip(signals[axis], -1.0, 1.0), 0.0, 100.0) for axis in AXIS_ORDER[1:]}
 
 
 def plan_multiaxis(data: Mapping, config: MultiAxisConfig) -> dict[str, list[tuple[float, float]]]:
-    """Plan synchronized L0/L1/L2/R0/R1/R2 trajectories."""
     l0 = plan_motion(dict(data), config.motion)
     if not l0:
         return {axis: [] for axis in AXIS_ORDER}
-
     action_times = np.asarray([at for at, _ in l0], dtype=np.float64)
     l0_positions = np.asarray([pos for _, pos in l0], dtype=np.float64)
     targets = _secondary_targets(data, action_times, l0_positions, config)
-
     axes: dict[str, list[tuple[float, float]]] = {"L0": l0}
     for axis in AXIS_ORDER[1:]:
         speed_limit, acceleration_limit = SECONDARY_LIMITS[axis]
-        axes[axis] = apply_constraints(
-            zip(action_times, targets[axis]),
-            max_speed=speed_limit,
-            max_acceleration=acceleration_limit,
-            min_interval=config.motion.min_interval,
-        )
+        axes[axis] = apply_constraints(zip(action_times, targets[axis]), max_speed=speed_limit, max_acceleration=acceleration_limit, min_interval=config.motion.min_interval)
     return axes
 
 
@@ -235,11 +189,7 @@ def validate_multiaxis(plan: Mapping[str, list[tuple[float, float]]]) -> None:
 
 
 def _funscript_payload(axis: str, actions: list[tuple[float, float]], metadata: Mapping | None) -> dict:
-    encoded = [
-        {"at": int(round(float(at) * 1000)), "pos": int(round(float(pos)))}
-        for at, pos in actions
-        if np.isfinite(at) and np.isfinite(pos)
-    ]
+    encoded = [{"at": int(round(float(at) * 1000)), "pos": int(round(float(pos)))} for at, pos in actions if np.isfinite(at) and np.isfinite(pos)]
     encoded.sort(key=lambda item: item["at"])
     duration = encoded[-1]["at"] if encoded else 0
     meta = {
@@ -276,19 +226,14 @@ def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf8") as handle:
             dump(_funscript_payload(axis, list(plan[axis]), metadata), handle, indent=2)
-
     if manifest:
         l0_path = paths["L0"]
         manifest_path = l0_path.with_suffix(".motion.json")
         payload = {
-            "version": "1.1",
+            "version": "1.2",
+            "metadata": dict(metadata or {}),
             "axes": {
-                axis: {
-                    "channel": AXIS_CHANNELS[axis],
-                    "description": AXIS_DESCRIPTIONS[axis],
-                    "file": paths[axis].name,
-                    "actions": len(plan[axis]),
-                }
+                axis: {"channel": AXIS_CHANNELS[axis], "description": AXIS_DESCRIPTIONS[axis], "file": paths[axis].name, "actions": len(plan[axis])}
                 for axis in AXIS_ORDER
             },
         }
