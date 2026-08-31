@@ -33,17 +33,14 @@ def test_plan_multiaxis_has_six_distinct_bounded_axes():
             preset="balanced",
         ),
     )
-
     assert tuple(plan) == AXIS_ORDER
     assert all(plan[axis] for axis in AXIS_ORDER)
-
     for axis in AXIS_ORDER:
         times = [at for at, _ in plan[axis]]
         positions = np.asarray([pos for _, pos in plan[axis]])
         assert times == sorted(times)
         assert np.all(np.isfinite(positions))
         assert np.all((positions >= 0.0) & (positions <= 100.0))
-
     l1 = np.asarray([pos for _, pos in plan["L1"]])
     l2 = np.asarray([pos for _, pos in plan["L2"]])
     r0 = np.asarray([pos for _, pos in plan["R0"]])
@@ -67,13 +64,17 @@ def test_standard_bundle_paths_and_export(tmp_path):
     assert paths["R2"].name == "scene.pitch.funscript"
 
     plan = plan_multiaxis(sample_data(), MultiAxisConfig(motion=MotionConfig(subdivision=1)))
-    written = export_funscript_bundle(tmp_path / "scene.funscript", plan)
+    metadata = {"choreography_sections": "intro:0-8", "notes": "mode=choreography"}
+    written = export_funscript_bundle(tmp_path / "scene.funscript", plan, metadata=metadata)
 
     for axis in AXIS_ORDER:
         assert written[axis].exists()
         payload = json.loads(written[axis].read_text(encoding="utf8"))
         assert payload["metadata"]["axis"] == axis
+        assert payload["metadata"]["choreography_sections"] == "intro:0-8"
         assert payload["actions"]
 
     manifest = json.loads(written["manifest"].read_text(encoding="utf8"))
     assert set(manifest["axes"]) == set(AXIS_ORDER)
+    assert manifest["version"] == "1.2"
+    assert manifest["metadata"]["choreography_sections"] == "intro:0-8"
