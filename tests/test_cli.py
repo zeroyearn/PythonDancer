@@ -30,6 +30,12 @@ def test_cli_v2_defaults():
     assert args.no_device_ranges is False
     assert args.tcode is False
     assert args.serial_port is None
+    assert args.intiface is False
+    assert args.intiface_address == "ws://127.0.0.1:12345"
+    assert args.intiface_device is None
+    assert args.soft_start_ms == 750
+    assert args.auto_home is True
+    assert args.home_ms == 700
 
 
 def test_cli_multiaxis_flags():
@@ -83,6 +89,9 @@ def test_cli_tcode_device_flags():
         "--play_speed", "1.5",
         "--start_at", "42.5",
         "--seek_ramp_ms", "180",
+        "--soft_start_ms", "900",
+        "--no-auto-home",
+        "--home_ms", "850",
         "--no_device_ranges",
     ])
     assert args.tcode is True
@@ -92,4 +101,27 @@ def test_cli_tcode_device_flags():
     assert args.play_speed == 1.5
     assert args.start_at == 42.5
     assert args.seek_ramp_ms == 180
+    assert args.soft_start_ms == 900
+    assert args.auto_home is False
+    assert args.home_ms == 850
     assert args.no_device_ranges is True
+
+
+def test_cli_intiface_flags():
+    args = cli_args().parse_args([
+        "song.wav", "--cli", "--multiaxis", "--intiface",
+        "--intiface_address", "ws://localhost:23456",
+        "--intiface_device", "3",
+        "--play_speed", "0.75",
+        "--start_at", "12.25",
+        "--soft_start_ms", "1100",
+        "--home_ms", "900",
+    ])
+    assert args.intiface is True
+    assert args.intiface_address == "ws://localhost:23456"
+    assert args.intiface_device == 3
+    assert args.play_speed == 0.75
+    assert args.start_at == 12.25
+    assert args.soft_start_ms == 1100
+    assert args.auto_home is True
+    assert args.home_ms == 900
