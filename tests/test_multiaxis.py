@@ -76,5 +76,5 @@ def test_standard_bundle_paths_and_export(tmp_path):
 
     manifest = json.loads(written["manifest"].read_text(encoding="utf8"))
     assert set(manifest["axes"]) == set(AXIS_ORDER)
-    assert manifest["version"] == "1.2"
+    assert manifest["version"] == "1.3"
     assert manifest["metadata"]["choreography_sections"] == "intro:0-8"
