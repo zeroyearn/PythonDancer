@@ -1,13 +1,12 @@
 import numpy as np
 
-from dancer.choreography import detect_sections, musical_phase, synthesize_choreography_signals
+from dancer.choreography import ChoreographyAnalysis, SectionSpan, detect_sections, musical_phase, synthesize_choreography_signals
 from dancer.motion import MotionConfig
 from dancer.multiaxis import AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, plan_multiaxis
 
 
 def _song_data(beats=64):
     times = np.arange(1, beats + 1, dtype=np.float64) * 0.5
-    # Four 4-bar phrases with deliberately different dynamics.
     energy = np.concatenate([
         np.linspace(0.05, 0.15, 16),
         np.linspace(0.35, 0.48, 16),
@@ -46,7 +45,7 @@ def test_musical_phase_tracks_real_beat_bar_and_phrase_coordinates():
     phase = musical_phase(beats, [0.5, 0.75, 1.0, 2.5], beats_per_bar=4, bars_per_phrase=2)
     assert np.allclose(phase["beat_position"][:3], [0.0, 0.5, 1.0])
     assert np.allclose(phase["beat_phase"][:3], [0.0, 0.5, 0.0])
-    assert phase["bar_phase"][3] == 0.0  # beat index 4 starts the next 4/4 bar
+    assert phase["bar_phase"][3] == 0.0
     assert np.all((phase["phrase_phase"] >= 0) & (phase["phrase_phase"] < 1))
 
 
@@ -61,24 +60,30 @@ def test_section_detection_is_phrase_aligned_and_dynamic():
     assert any(section.label in {"build", "chorus", "drop"} for section in analysis.sections[2:])
 
 
+def test_analysis_summary_merges_adjacent_labels_and_serializes_metrics():
+    analysis = ChoreographyAnalysis(
+        (
+            SectionSpan(0, 16, "verse", 0.3, 0.4, 0.1),
+            SectionSpan(16, 32, "verse", 0.4, 0.5, 0.2),
+            SectionSpan(32, 48, "drop", 0.9, 0.95, 0.8),
+        ),
+        beats_per_bar=4,
+        bars_per_phrase=4,
+        section_bars=4,
+    )
+    assert analysis.summary() == "verse:0-32 | drop:32-48"
+    payload = analysis.to_dict()
+    assert payload["summary"] == analysis.summary()
+    assert payload["sections"][2]["label"] == "drop"
+    assert payload["sections"][2]["activity"] == 0.95
+
+
 def test_gesture_choreography_is_bounded_distinct_and_not_reactive_clone():
     data = _song_data()
     action_times = np.arange(0.5, 32.01, 0.25)
     l0 = 50.0 + 35.0 * np.sin(np.arange(action_times.size) * np.pi / 2.0)
-    signals, analysis = synthesize_choreography_signals(
-        data,
-        action_times,
-        l0,
-        preset="expressive",
-        gesture_strength=1.0,
-    )
-    reactive_heavy, _ = synthesize_choreography_signals(
-        data,
-        action_times,
-        l0,
-        preset="expressive",
-        gesture_strength=0.0,
-    )
+    signals, analysis = synthesize_choreography_signals(data, action_times, l0, preset="expressive", gesture_strength=1.0)
+    reactive_heavy, _ = synthesize_choreography_signals(data, action_times, l0, preset="expressive", gesture_strength=0.0)
     assert analysis.sections
     assert set(signals) == {"L1", "L2", "R0", "R1", "R2"}
     for values in signals.values():
@@ -97,7 +102,6 @@ def test_multiaxis_defaults_to_choreography_but_reactive_mode_remains_available(
     reactive_config = MultiAxisConfig(motion=motion, preset="balanced", mode="reactive")
     assert choreo_config.mode == "choreography"
     assert analyze_multiaxis(data, choreo_config).sections
-
     choreo = plan_multiaxis(data, choreo_config)
     reactive = plan_multiaxis(data, reactive_config)
     assert set(choreo) == set(AXIS_ORDER)
