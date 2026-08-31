@@ -13,7 +13,7 @@ def main():
         return cmd(args)
 
     if args.multiaxis:
-        from .multiaxis_ui_v2 import ux
+        from .multiaxis_ui_v3 import ux
         ux(args)
         return 0
 
