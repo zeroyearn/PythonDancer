@@ -184,7 +184,6 @@ def apply_smart_limits(plan, profile: SmartLimitProfile | str = "balanced"):
     timeline = sorted({float(at) for actions in result.values() for at, _ in actions})
     if not timeline:
         return result
-    # Modify only existing target keyframes to preserve editor timing intent.
     for axis in AXIS_ORDER:
         if not result[axis]:
             continue
@@ -204,26 +203,28 @@ def apply_smart_limits(plan, profile: SmartLimitProfile | str = "balanced"):
                 if total > profile.sway_roll_budget:
                     scale = profile.sway_roll_budget / max(total, 1e-9)
                     value = 50.0 + (value - 50.0) * scale
-
             velocity_load = _normalized_velocity_load(result, at)
             if velocity_load > profile.simultaneous_velocity_budget:
                 scale = profile.simultaneous_velocity_budget / max(velocity_load, 1e-9)
                 anchor = sample_axis(result[axis], max(0.0, at - .06), value)
                 value = anchor + (value - anchor) * scale
-
             adjusted.append((at, float(np.clip(value, 0.0, 100.0))))
         result[axis] = adjusted
     return result
 
 
 def _smooth_values(values: np.ndarray, amount: float) -> np.ndarray:
+    """Low-pass without erasing or reversing the source motion character."""
     amount = float(np.clip(amount, 0.0, 1.0))
     if amount <= 0 or values.size < 3:
         return values
-    out = values.copy()
-    passes = 1 + int(round(amount * 4))
+    out = values.astype(np.float64, copy=True)
+    passes = 1 + int(np.floor(amount * 3.0))
+    blend = min(0.75, amount)
     for _ in range(passes):
-        out[1:-1] = .25 * out[:-2] + .5 * out[1:-1] + .25 * out[2:]
+        filtered = out.copy()
+        filtered[1:-1] = .25 * out[:-2] + .5 * out[1:-1] + .25 * out[2:]
+        out = out * (1.0 - blend) + filtered * blend
     return out
 
 
@@ -294,12 +295,7 @@ def fill_motion_gaps(plan, beats: Sequence[float], *, mode: str = "ambient", thr
 
 
 def add_soft_start(plan, start_at: float, *, duration_ms: int = 750, neutral: float = 50.0):
-    """Add a neutral-to-selected-pose ramp for offline/live helpers.
-
-    When the selected time is too close to zero to fit the ramp, future
-    keyframes are shifted forward just enough to preserve a real non-zero ramp.
-    Live TCode/Intiface paths normally perform their own transport-level ramp.
-    """
+    """Add a neutral-to-selected-pose ramp for offline/live helpers."""
     result = copy_plan(plan)
     ramp = max(0.05, int(duration_ms) / 1000.0)
     start_at = max(0.0, float(start_at))
