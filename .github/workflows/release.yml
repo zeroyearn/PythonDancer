@@ -176,24 +176,26 @@ jobs:
 
           ### Editing
           - direct six-axis keyframe editing with add, drag, delete, smooth, flatten, scale, and offset;
-          - beat snap and nearest/floor/ceil quantization;
-          - Linear, Smoothstep, PCHIP, and Makima-style curve interpolation;
+          - Beat Snap and nearest/floor/ceil quantization;
+          - Linear, Smoothstep, PCHIP, and Makima curve interpolation;
           - per-axis interpolation settings stored in project state.
 
           ### Diagnostics & safety
-          - motion-intensity and risk heatmaps across all six axes;
-          - Smart Limit cross-axis safety envelopes with balanced/conservative/aggressive profiles;
+          - motion-intensity and combined risk heatmaps across all six axes;
+          - Smart Limit cross-axis envelopes with `safe`, `balanced`, and `open` profiles;
+          - simultaneous six-axis normalized velocity budgets;
           - music-aware ambient/beat/repeat gap filling;
-          - configurable axis linking with gain and delay;
-          - Soft Start and optional Auto Home/return-to-neutral device transitions;
+          - Axis Linking with gain, delay, smoothing, position/velocity mode, and only-if-empty behavior;
+          - real Soft Start and optional Auto Home/return-to-neutral live-device transitions;
           - final physical speed/acceleration constraint pass remains authoritative before export or playback.
 
           ### Projects & devices
-          - portable `.pdance` project files with editable plan, workspace, curve, safety, and output state;
-          - autosave plus bounded Undo/Redo history;
+          - portable `.pdance` project files with editable plan, workspace, curve, safety, device, and output state;
+          - autosave, recent-project tracking, and bounded full-session Undo/Redo history;
           - Intiface Central / Buttplug protocol v4 output over WebSocket;
-          - desktop release builds include Intiface support while the Python package keeps it as the optional `intiface` extra;
-          - TCode D0/D1/D2, Pause/Resume/Seek/DSTOP, and six-axis funscript export remain supported.
+          - desktop release builds include Intiface support while source installs keep it in the optional `intiface` extra;
+          - TCode D0/D1/D2, Pause/Resume/Seek/DSTOP, and six-axis funscript export remain supported;
+          - exported funscript/TCode timelines remain canonical; Soft Start and Auto Home are live transport policies.
 
           ### macOS note
           macOS builds are ad-hoc signed but are **not Apple-notarized**. On first launch, macOS may require Control-click/right-click → **Open**. FFmpeg is bundled inside the app.
