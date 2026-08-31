@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import subprocess
 
+from .runtime import command_path
+
 
 def ffmpeg_check():
+    ffmpeg = command_path("ffmpeg")
     try:
-        subprocess.check_call(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call([ffmpeg, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (FileNotFoundError, subprocess.CalledProcessError):
         print("FFmpeg is missing or unavailable.")
         print("Install it from https://ffmpeg.org/download.html or your package manager.")
@@ -15,7 +18,8 @@ def ffmpeg_check():
 
 
 def ffmpeg_conv(in_file, out_file):
-    subprocess.check_call(["ffmpeg", "-y", "-i", str(in_file), "-map", "0:a:0", "-ar", "48000", "-ac", "1", str(out_file)])
+    ffmpeg = command_path("ffmpeg")
+    subprocess.check_call([ffmpeg, "-y", "-i", str(in_file), "-map", "0:a:0", "-ar", "48000", "-ac", "1", str(out_file)])
 
 
 def cli_args():
