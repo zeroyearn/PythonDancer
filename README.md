@@ -77,7 +77,7 @@ python -m pytest
 
 FFmpeg is recommended for media containers. `pyserial` is included for serial TCode playback.
 
-Demucs is intentionally **not** a required dependency. The official Meta Demucs repository is archived, so PythonDancer treats it as an optional external accelerator. If an importable `demucs` package exists, `--stems auto|required` may invoke it. Otherwise provide an existing stem directory or keep stems off.
+Demucs is intentionally **not** a required dependency. The official Meta Demucs repository is archived, so PythonDancer treats it as an optional external accelerator. In a normal Python install it can use an importable `demucs` module or a `demucs` executable on `PATH`. In a frozen/PyInstaller build it uses the external `demucs` executable on `PATH`; otherwise use an existing stem directory. If neither is available, `auto` falls back and `required` reports an error.
 
 ## Run
 
@@ -272,7 +272,7 @@ python -m dancer new-song.mp3 --cli --yes --multiaxis \
   --save_learned_profile my-style.json
 ```
 
-The learner measures robust secondary-axis travel, movement activity/smoothness and cross-axis correlations. It converts those statistics into a `ChoreographyProfile`; it does **not** copy timestamps or positions from the reference.
+The learner estimates each reference axis's own center before measuring robust travel, then normalizes that travel against axis-specific balanced baselines. It also measures movement activity/smoothness and cross-axis correlations. It converts those statistics into a `ChoreographyProfile`; it does **not** copy timestamps or positions from the reference.
 
 The GUI has separate Profile and Reference bundle fields. They are mutually exclusive. A profile learned from a reference can be saved with **Save learned profile**.
 
@@ -295,7 +295,7 @@ python -m dancer song.mp3 --cli --yes --multiaxis \
   --stem_dir ./stems/song
 ```
 
-Or, if an importable Demucs installation is available:
+Or, if Demucs is available:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis \
