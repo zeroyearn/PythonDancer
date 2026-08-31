@@ -28,11 +28,7 @@ def test_position_and_axis_encoding():
 
 
 def test_d2_axis_ranges_are_parsed_and_applied():
-    axes = parse_d2_axes([
-        "L0 1000 9000 Up",
-        "R0 2000 8000 Twist",
-        "Ready!",
-    ])
+    axes = parse_d2_axes(["L0 1000 9000 Up", "R0 2000 8000 Twist", "Ready!"])
     assert axes["L0"] == AxisRange("L0", 1000, 9000, "Up")
     assert position_to_tcode(0, axis_range=axes["L0"]) == 1000
     assert position_to_tcode(50, axis_range=axes["L0"]) == 5000
@@ -108,17 +104,17 @@ def test_playback_controller_pause_seek_resume_stop():
         def stop(self):
             self.stop_count += 1
 
-    plan = {
-        "L0": [(5.0, 0), (10.0, 100)],
-        "R0": [(5.0, 25), (10.0, 75)],
-    }
+    plan = {"L0": [(5.0, 0), (10.0, 100)], "R0": [(5.0, 25), (10.0, 75)]}
     device = FakeDevice()
     controller = TCodePlaybackController(plan, device, seek_ramp_ms=0)
     thread = Thread(target=controller.play, daemon=True)
     thread.start()
     sleep(0.03)
+    before_pause = len(device.sent)
     controller.pause()
     assert controller.state == "paused"
+    sleep(0.03)
+    assert len(device.sent) == before_pause
     controller.seek(7.0)
     sleep(0.03)
     assert controller.position == pytest.approx(7.0, abs=0.1)
