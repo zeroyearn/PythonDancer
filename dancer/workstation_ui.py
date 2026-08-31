@@ -15,13 +15,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registers 3D projection 
 from .multiaxis import AXIS_CHANNELS, AXIS_ORDER
 from .multiaxis_ui_v2 import ACCENT, MUTED, ROTATION, TRANSLATION
 from .multiaxis_ui_v3 import MultiAxisWindow as _EditorWindow
-from .tcode import (
-    SerialTCodeDevice,
-    TCodePlaybackController,
-    build_tcode_events,
-    default_tcode_path,
-    export_tcode_script,
-)
+from .tcode import SerialTCodeDevice, TCodePlaybackController, build_tcode_events, default_tcode_path, export_tcode_script
 from .workspace_constraints import constrain_workspace_plan
 
 
@@ -29,19 +23,13 @@ class MultiAxisWindow(_EditorWindow):
     def _apply_workspace(self, redraw=True):
         if not self.workspace or self.base_plan is None:
             return
-        raw = self.workspace.output_plan(self.base_plan)
-        self.plan = constrain_workspace_plan(raw, self.generated_config)
-        self.section_summary_var.set(
-            "Structure: " + " | ".join(
-                f"{section.label}:{section.start:.1f}-{section.end:.1f}"
-                for section in self.workspace.sections
-            )
-        )
+        self.plan = constrain_workspace_plan(self.workspace.output_plan(self.base_plan), self.generated_config)
+        self.section_summary_var.set("Structure: " + " | ".join(
+            f"{section.label}:{section.start:.1f}-{section.end:.1f}" for section in self.workspace.sections
+        ))
         self.selection_var.set(self._selection_label())
         for axis in AXIS_ORDER:
-            self.axis_count_vars[axis].set(
-                f"{axis} · {AXIS_CHANNELS[axis]} · {len(self.plan.get(axis, ()))}"
-            )
+            self.axis_count_vars[axis].set(f"{axis} · {AXIS_CHANNELS[axis]} · {len(self.plan.get(axis, ()))}")
         if redraw:
             self.work_timeline.set_model(self.workspace, self.data)
             self._redraw_workspace_preview()
@@ -52,11 +40,7 @@ class MultiAxisWindow(_EditorWindow):
             return
         preview = {axis: list(self.plan.get(axis, ())) for axis in AXIS_ORDER}
         if self.workspace.solo_axis is not None:
-            preview = {
-                axis: actions if axis == self.workspace.solo_axis else []
-                for axis, actions in preview.items()
-            }
-
+            preview = {axis: actions if axis == self.workspace.solo_axis else [] for axis, actions in preview.items()}
         for axis in AXIS_ORDER:
             self.preview_axes[axis].clear()
         self._style_axes()
@@ -65,24 +49,11 @@ class MultiAxisWindow(_EditorWindow):
             if actions:
                 times = np.asarray([at for at, _ in actions], dtype=np.float64)
                 positions = np.asarray([pos for _, pos in actions], dtype=np.float64)
-                self.preview_axes[axis].plot(
-                    times,
-                    positions,
-                    linewidth=1.15,
-                    color=TRANSLATION if axis.startswith("L") else ROTATION,
-                )
+                self.preview_axes[axis].plot(times, positions, linewidth=1.15, color=TRANSLATION if axis.startswith("L") else ROTATION)
             if self.workspace.axes[axis].muted:
-                self.preview_axes[axis].text(
-                    .5, .5, "MUTED",
-                    transform=self.preview_axes[axis].transAxes,
-                    ha="center", va="center", color=MUTED, fontsize=10, fontweight="bold",
-                )
+                self.preview_axes[axis].text(.5, .5, "MUTED", transform=self.preview_axes[axis].transAxes, ha="center", va="center", color=MUTED, fontsize=10, fontweight="bold")
             elif self.workspace.axes[axis].locked:
-                self.preview_axes[axis].text(
-                    .98, .08, "LOCK",
-                    transform=self.preview_axes[axis].transAxes,
-                    ha="right", color=MUTED, fontsize=7,
-                )
+                self.preview_axes[axis].text(.98, .08, "LOCK", transform=self.preview_axes[axis].transAxes, ha="right", color=MUTED, fontsize=7)
             for section in self.workspace.sections[1:]:
                 self.preview_axes[axis].axvline(section.start, color=MUTED, linewidth=.6, alpha=.2)
             selection = self.workspace.selection.normalized(self.workspace.duration)
@@ -91,12 +62,7 @@ class MultiAxisWindow(_EditorWindow):
         self.canvas.draw_idle()
 
     def _device_plan(self):
-        """Drop muted/empty axes so TCode can select a non-L0 timing source."""
-        return {
-            axis: list(self.plan.get(axis, ()))
-            for axis in AXIS_ORDER
-            if self.plan.get(axis)
-        }
+        return {axis: list(self.plan.get(axis, ())) for axis in AXIS_ORDER if self.plan.get(axis)}
 
     def export_tcode(self):
         if not self.plan or not self.source_path:
@@ -105,12 +71,7 @@ class MultiAxisWindow(_EditorWindow):
         if not device_plan:
             messagebox.showwarning("PythonDancer", "All axes are muted; there is no TCode motion to export.")
             return
-        selected = filedialog.asksaveasfilename(
-            title="Export scheduled TCode script",
-            defaultextension=".tcode",
-            initialfile=default_tcode_path(self.source_path).name,
-            filetypes=[("TCode script", "*.tcode"), ("All files", "*.*")],
-        )
+        selected = filedialog.asksaveasfilename(title="Export scheduled TCode script", defaultextension=".tcode", initialfile=default_tcode_path(self.source_path).name, filetypes=[("TCode script", "*.tcode"), ("All files", "*.*")])
         if not selected:
             return
         try:
@@ -152,14 +113,7 @@ class MultiAxisWindow(_EditorWindow):
                     self.active_device = device
                     profile = device.profile()
                     self.device_profile = profile
-                    controller = TCodePlaybackController(
-                        device_plan,
-                        device,
-                        speed=speed,
-                        profile=profile,
-                        use_device_ranges=use_ranges,
-                        seek_ramp_ms=seek_ramp_ms,
-                    )
+                    controller = TCodePlaybackController(device_plan, device, speed=speed, profile=profile, use_device_ranges=use_ranges, seek_ramp_ms=seek_ramp_ms)
                     self.active_controller = controller
                     summary = self._profile_summary(profile)
                     self.after(0, lambda: self.status_var.set(f"Playing on {port} at {speed:g}x — {summary}"))
