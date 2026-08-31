@@ -17,6 +17,8 @@ a = Analysis(
 		"librosa.feature.rhythm", 
 		"librosa.beat", 
 		"librosa.core",
+		"serial",
+		"serial.tools.list_ports",
 	],
 	hookspath=["extra-hooks"],
 	hooksconfig={},

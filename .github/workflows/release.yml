@@ -1,0 +1,217 @@
+name: Release PythonDancer
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: false
+        default: "v2.4.0"
+
+permissions:
+  contents: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      needed: ${{ steps.release.outputs.needed }}
+    steps:
+      - name: Resolve release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_TAG}" ]]; then
+            TAG="${INPUT_TAG}"
+          else
+            TAG="v2.4.0"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "needed=false" >> "${GITHUB_OUTPUT}"
+            echo "Release ${TAG} already exists; nothing to publish."
+          else
+            echo "needed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+  macos:
+    needs: preflight
+    if: needs.preflight.outputs.needed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Verify runner architecture
+        shell: bash
+        run: test "$(uname -m)" = "${{ matrix.arch }}"
+
+      - name: Install FFmpeg
+        shell: bash
+        run: |
+          brew install ffmpeg
+          ffmpeg -version | head -n 1
+
+      - name: Install Intel scientific compatibility wheels
+        shell: bash
+        run: |
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            python -m pip install --only-binary=:all: "numba==0.61.2" "llvmlite==0.44.0"
+          else
+            echo "Apple Silicon uses current numba/llvmlite wheels."
+          fi
+
+      - name: Install
+        run: python -m pip install -e '.[build,test]'
+
+      - name: Compile and test
+        shell: bash
+        run: |
+          python -m compileall -q dancer tests macos_entry.py
+          python -m pytest
+
+      - name: Package macOS app
+        shell: bash
+        run: bash scripts/build_macos.sh "${{ needs.preflight.outputs.version }}" "${{ matrix.arch }}"
+
+      - name: Upload macOS release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            PythonDancer-${{ needs.preflight.outputs.version }}-macOS-${{ matrix.arch }}.zip
+            PythonDancer-${{ needs.preflight.outputs.version }}-macOS-${{ matrix.arch }}.dmg
+            PythonDancer-${{ needs.preflight.outputs.version }}-macOS-${{ matrix.arch }}.sha256
+
+  windows:
+    needs: preflight
+    if: needs.preflight.outputs.needed == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e '.[build,test]'
+
+      - name: Compile and test
+        shell: pwsh
+        run: |
+          python -m compileall -q dancer tests
+          python -m pytest
+
+      - name: Build Windows package
+        shell: pwsh
+        run: |
+          python builder.py
+          if (-not (Test-Path "dist/PythonDancer.exe")) { throw "PythonDancer.exe missing" }
+          $version = "${{ needs.preflight.outputs.version }}"
+          $archive = "PythonDancer-$version-Windows-x86_64.zip"
+          Compress-Archive -Path "dist/*" -DestinationPath $archive -Force
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Out-File -Encoding ascii "PythonDancer-$version-Windows-x86_64.sha256"
+
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x86_64
+          if-no-files-found: error
+          path: |
+            PythonDancer-${{ needs.preflight.outputs.version }}-Windows-x86_64.zip
+            PythonDancer-${{ needs.preflight.outputs.version }}-Windows-x86_64.sha256
+
+  publish:
+    needs: [preflight, macos, windows]
+    if: needs.preflight.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## PythonDancer 2.4.0
+
+          PythonDancer 2.4 turns the six-axis generator into an editable choreography workstation while preserving the 2.3 musical, style-learning, stem-aware, and TCode device stack.
+
+          ### Workstation highlights
+          - unified waveform, beat, section, gesture, and playback timeline;
+          - draggable section boundaries and editable section labels;
+          - gesture blocks for pulse/sway/rock/circle/spiral/wave/accent;
+          - per-axis Solo / Mute / Lock controls;
+          - non-destructive local regenerate with boundary crossfade;
+          - live six-axis 3D pose preview tied to the playhead;
+          - edited trajectories re-run through per-axis physical constraints before preview, export, TCode, or hardware playback;
+          - muted L0 no longer prevents remaining TCode axes from playing.
+
+          ### Existing 2.x stack retained
+          - beat/bar/phrase-aware six-axis choreography;
+          - intro/verse/build/chorus/drop/breakdown/outro section intent;
+          - portable ChoreographyProfile JSON styles;
+          - statistical style learning from existing six-axis funscript bundles;
+          - optional drums/bass/vocals/other stem-aware choreography;
+          - D0/D1/D2-aware TCode v0.3 playback with device-range mapping;
+          - Play / Pause / Resume / Seek / DSTOP;
+          - macOS Apple Silicon arm64 and Intel x86_64 desktop builds;
+          - Windows x86_64 desktop build.
+
+          ### macOS note
+          macOS builds are ad-hoc signed but are **not Apple-notarized**. On first launch, macOS may require Control-click/right-click → **Open**. FFmpeg is bundled inside the app.
+
+          Demucs remains optional and external. Existing separated stems can be selected directly in the GUI.
+          EOF
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          find release-assets -maxdepth 1 -type f -print | sort
+          gh release create "${TAG}" \
+            release-assets/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "PythonDancer ${VERSION}" \
+            --notes-file RELEASE_NOTES.md

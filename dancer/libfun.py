@@ -217,7 +217,6 @@ def _raw_speeds(actions):
 def autoval(data, tpi=50, target_speed=250, v2above=0.65, opt=1, *, planner="adaptive"):
     if len(np.asarray(data.get("beats", []))) == 0:
         return 100.0, 1.0
-
     target_position = float(np.clip(tpi, 0, 100))
 
     def position_error(pitch_range):
