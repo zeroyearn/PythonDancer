@@ -84,7 +84,8 @@ def cli_args():
     output.add_argument("--intiface_address", default="ws://127.0.0.1:12345", help="Intiface Central WebSocket address")
     output.add_argument("--intiface_device", type=int, help="Optional Intiface device index; the first device is used when omitted")
     output.add_argument("--soft_start_ms", type=int, default=750, metavar="MS", help="Ramp time used to enter the selected live-playback start pose")
-    output.add_argument("--auto_home", action=argparse.BooleanOptionalAction, default=True, help="Return live device playback to neutral after natural completion")
+    output.add_argument("--auto_home", "--auto-home", dest="auto_home", action="store_true", default=True, help="Return live device playback to neutral after natural completion")
+    output.add_argument("--no_auto_home", "--no-auto-home", dest="auto_home", action="store_false", help="Disable the live neutral return after natural completion")
     output.add_argument("--home_ms", type=int, default=700, metavar="MS", help="Auto Home neutral-return duration")
 
     parser.add_argument("--auto_pitch", type=float, default=50.0, metavar="[0-100]", help="Target average position")
