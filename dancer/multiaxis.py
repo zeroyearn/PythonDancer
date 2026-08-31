@@ -8,9 +8,11 @@ from typing import Mapping
 
 import numpy as np
 
-from .choreography import ChoreographyAnalysis, detect_sections, synthesize_choreography_signals
+from .choreography import ChoreographyAnalysis, detect_sections
+from .choreo_profile import synthesize_profiled_choreography
 from .features import safe_normalize
 from .motion import MotionConfig, apply_constraints, plan_motion
+from .style import ChoreographyProfile
 
 AXIS_ORDER = ("L0", "L1", "L2", "R0", "R1", "R2")
 AXIS_CHANNELS = {"L0": "stroke", "L1": "surge", "L2": "sway", "R0": "twist", "R1": "roll", "R2": "pitch"}
@@ -42,6 +44,7 @@ class MultiAxisConfig:
     beats_per_bar: int = 4
     bars_per_phrase: int = 4
     section_bars: int = 4
+    profile: ChoreographyProfile | None = None
 
     def __post_init__(self):
         if self.preset not in _PRESET_AMPLITUDES:
@@ -56,6 +59,8 @@ class MultiAxisConfig:
             raise ValueError("neutral must be finite")
         if self.beats_per_bar <= 0 or self.bars_per_phrase <= 0 or self.section_bars <= 0:
             raise ValueError("musical grid values must be positive")
+        if self.profile is not None and not isinstance(self.profile, ChoreographyProfile):
+            raise TypeError("profile must be a ChoreographyProfile")
 
 
 def _feature(data: Mapping, name: str, length: int, fallback: str | None = None) -> np.ndarray:
@@ -140,7 +145,7 @@ def analyze_multiaxis(data: Mapping, config: MultiAxisConfig) -> ChoreographyAna
 
 def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, config: MultiAxisConfig) -> dict[str, np.ndarray]:
     if config.mode == "choreography":
-        signals, _ = synthesize_choreography_signals(
+        signals, _ = synthesize_profiled_choreography(
             data,
             action_times,
             l0_positions,
@@ -149,13 +154,22 @@ def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np
             beats_per_bar=config.beats_per_bar,
             bars_per_phrase=config.bars_per_phrase,
             section_bars=config.section_bars,
+            profile=config.profile,
         )
     else:
         signals = _reactive_signals(data, action_times, l0_positions, config.preset)
     amplitudes = _PRESET_AMPLITUDES[config.preset]
+    profile = config.profile or ChoreographyProfile()
     neutral = float(np.clip(config.neutral, 0.0, 100.0))
     strength = float(config.strength)
-    return {axis: np.clip(neutral + amplitudes[axis] * strength * np.clip(signals[axis], -1.0, 1.0), 0.0, 100.0) for axis in AXIS_ORDER[1:]}
+    return {
+        axis: np.clip(
+            neutral + amplitudes[axis] * profile.axis_multiplier(axis) * strength * np.clip(signals[axis], -1.0, 1.0),
+            0.0,
+            100.0,
+        )
+        for axis in AXIS_ORDER[1:]
+    }
 
 
 def plan_multiaxis(data: Mapping, config: MultiAxisConfig) -> dict[str, list[tuple[float, float]]]:
@@ -230,7 +244,7 @@ def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple
         l0_path = paths["L0"]
         manifest_path = l0_path.with_suffix(".motion.json")
         payload = {
-            "version": "1.2",
+            "version": "1.3",
             "metadata": dict(metadata or {}),
             "axes": {
                 axis: {"channel": AXIS_CHANNELS[axis], "description": AXIS_DESCRIPTIONS[axis], "file": paths[axis].name, "actions": len(plan[axis])}
