@@ -5,6 +5,8 @@ from pathlib import Path
 from .libfun import autoval, create_actions, dump_csv, dump_funscript, load_audio_data, render_heatmap
 from .motion import MotionConfig
 from .multiaxis import AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, bundle_paths, export_funscript_bundle, plan_multiaxis
+from .stems import enrich_with_stems
+from .style import ChoreographyProfile, learn_profile_from_bundle, load_profile, save_profile
 from .tcode import (
     SerialTCodeDevice,
     TCodePlaybackController,
@@ -116,7 +118,23 @@ def _device_info(args) -> int:
     return 0
 
 
-def _multi_config(args, motion: MotionConfig) -> MultiAxisConfig:
+def _resolve_choreography_profile(args) -> ChoreographyProfile | None:
+    if args.profile and args.reference_bundle:
+        raise ValueError("Use either --profile or --reference_bundle, not both.")
+    if args.reference_bundle:
+        learned = learn_profile_from_bundle(args.reference_bundle, name=args.profile_name)
+        if args.save_learned_profile:
+            path = save_profile(args.save_learned_profile, learned)
+            print(f"Learned choreography profile: {path}")
+        return learned
+    if args.save_learned_profile:
+        raise ValueError("--save_learned_profile requires --reference_bundle.")
+    if args.profile:
+        return load_profile(args.profile)
+    return None
+
+
+def _multi_config(args, motion: MotionConfig, profile: ChoreographyProfile | None = None) -> MultiAxisConfig:
     return MultiAxisConfig(
         motion=motion,
         preset=args.multiaxis_preset,
@@ -126,17 +144,42 @@ def _multi_config(args, motion: MotionConfig) -> MultiAxisConfig:
         beats_per_bar=int(args.beats_per_bar),
         bars_per_phrase=int(args.bars_per_phrase),
         section_bars=int(args.section_bars),
+        profile=profile,
     )
 
 
-def _choreography_metadata(config: MultiAxisConfig, analysis) -> dict[str, object]:
-    return {
+def _choreography_metadata(config: MultiAxisConfig, analysis, data) -> dict[str, object]:
+    payload: dict[str, object] = {
         "mode": config.mode,
         "preset": config.preset,
         "axis_strength": float(config.strength),
         "gesture_strength": float(config.gesture_strength),
         "analysis": analysis.to_dict(),
     }
+    if config.profile is not None:
+        payload["profile"] = config.profile.to_dict()
+    stem_analysis = data.get("stem_analysis")
+    if isinstance(stem_analysis, dict):
+        payload["stems"] = dict(stem_analysis)
+    return payload
+
+
+def _enrich_stems(args, data, source: Path):
+    mode = "auto" if args.stem_dir and args.stems == "off" else args.stems
+    if mode == "off":
+        return data
+    print(f"Stem analysis: mode={mode}, model={args.demucs_model}...")
+    enriched = enrich_with_stems(
+        data,
+        source,
+        mode=mode,
+        stem_dir=args.stem_dir,
+        cache_dir=args.stem_cache,
+        model=args.demucs_model,
+    )
+    status = enriched.get("stem_analysis", {}).get("status", "unknown")
+    print(f"Stem analysis status: {status}")
+    return enriched
 
 
 def cmd(args):
@@ -186,6 +229,12 @@ def cmd(args):
         print("--seek_ramp_ms must be non-negative.")
         return 2
 
+    try:
+        choreography_profile = _resolve_choreography_profile(args) if args.multiaxis else None
+    except Exception as exc:
+        print(f"Unable to load/learn choreography profile: {exc}")
+        return 2
+
     out_file = Path(args.out_path) if args.out_path else audio_file.with_suffix(".csv" if args.csv else ".funscript")
     if args.multiaxis:
         existing = _multiaxis_existing_outputs(out_file, include_manifest=not args.no_manifest)
@@ -221,6 +270,12 @@ def cmd(args):
     try:
         print("Loading audio features...")
         data = load_audio_data(audio_file, plp=not args.no_plp)
+        if args.multiaxis:
+            try:
+                data = _enrich_stems(args, data, audio_file)
+            except Exception as exc:
+                print(f"Stem analysis failed: {exc}")
+                return 2
         if args.automap:
             print("Automapping...")
             pitch, energy = autoval(
@@ -247,9 +302,10 @@ def cmd(args):
                 max_acceleration=float(args.max_acceleration),
                 min_interval=float(args.min_interval),
             )
-            config = _multi_config(args, motion)
+            config = _multi_config(args, motion, choreography_profile)
             analysis = analyze_multiaxis(data, config)
-            print(f"Creating six-axis motion ({config.mode}, preset={config.preset})...")
+            profile_label = config.profile.name if config.profile is not None else "built-in"
+            print(f"Creating six-axis motion ({config.mode}, preset={config.preset}, profile={profile_label})...")
             if args.show_sections and analysis.sections:
                 print("Detected sections:")
                 for section in analysis.sections:
@@ -262,13 +318,13 @@ def cmd(args):
                 print("No actions could be generated from this input.")
                 return 2
             summary = analysis.summary()
-            choreography = _choreography_metadata(config, analysis)
+            choreography = _choreography_metadata(config, analysis, data)
             written = export_funscript_bundle(
                 out_file,
                 plan,
                 metadata={
                     "notes": (
-                        f"planner=multiaxis; mode={config.mode}; preset={config.preset}; "
+                        f"planner=multiaxis; mode={config.mode}; preset={config.preset}; profile={profile_label}; "
                         f"gesture_strength={config.gesture_strength}; subdivision={args.subdivision}; "
                         f"axis_strength={args.axis_strength}"
                     ),
