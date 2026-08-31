@@ -13,15 +13,7 @@ from matplotlib.figure import Figure
 from .libfun import autoval, load_audio_data
 from .motion import MotionConfig
 from .multiaxis import AXIS_CHANNELS, AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, export_funscript_bundle, plan_multiaxis
-from .tcode import (
-    SerialTCodeDevice,
-    TCodePlaybackController,
-    build_tcode_events,
-    default_tcode_path,
-    export_tcode_script,
-    list_serial_ports,
-    plan_duration,
-)
+from .tcode import SerialTCodeDevice, TCodePlaybackController, build_tcode_events, default_tcode_path, export_tcode_script, list_serial_ports, plan_duration
 
 
 class MultiAxisWindow(tk.Tk):
@@ -31,6 +23,7 @@ class MultiAxisWindow(tk.Tk):
         self.data = None
         self.plan = None
         self.analysis = None
+        self.generated_config: MultiAxisConfig | None = None
         self.source_path: Path | None = Path(args.audio_path) if args.audio_path else None
         self.worker: Thread | None = None
         self.device_worker: Thread | None = None
@@ -115,7 +108,6 @@ class MultiAxisWindow(tk.Tk):
         device.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         device.columnconfigure(1, weight=1)
         device.columnconfigure(7, weight=1)
-
         ttk.Label(device, text="Serial port").grid(row=0, column=0, sticky="w")
         self.port_combo = ttk.Combobox(device, textvariable=self.port_var, width=24)
         self.port_combo.grid(row=0, column=1, sticky="ew", padx=(6, 8))
@@ -227,14 +219,9 @@ class MultiAxisWindow(tk.Tk):
 
     def _motion_config(self, pitch: float, energy: float, subdivision: int) -> MotionConfig:
         return MotionConfig(
-            energy_multiplier=float(energy),
-            pitch_range=float(pitch),
-            overflow=int(self.args.overflow),
-            amplitude_centering=float(self.args.amplitude_centering),
-            center_offset=float(self.args.center_offset),
-            subdivision=int(subdivision),
-            max_speed=float(self.args.max_speed),
-            max_acceleration=float(self.args.max_acceleration),
+            energy_multiplier=float(energy), pitch_range=float(pitch), overflow=int(self.args.overflow),
+            amplitude_centering=float(self.args.amplitude_centering), center_offset=float(self.args.center_offset),
+            subdivision=int(subdivision), max_speed=float(self.args.max_speed), max_acceleration=float(self.args.max_acceleration),
             min_interval=float(self.args.min_interval),
         )
 
@@ -277,23 +264,10 @@ class MultiAxisWindow(tk.Tk):
                 pitch = float(self.args.pitch)
                 energy = float(self.args.energy)
                 if automap:
-                    pitch, energy = autoval(
-                        data,
-                        tpi=self.args.auto_pitch,
-                        target_speed=self.args.auto_speed,
-                        v2above=self.args.auto_per / 100.0,
-                        opt=self.args.auto_mod - 1,
-                        planner="adaptive",
-                    )
+                    pitch, energy = autoval(data, tpi=self.args.auto_pitch, target_speed=self.args.auto_speed, v2above=self.args.auto_per / 100.0, opt=self.args.auto_mod - 1, planner="adaptive")
                 config = MultiAxisConfig(
-                    motion=self._motion_config(pitch, energy, subdivision),
-                    preset=preset,
-                    strength=strength,
-                    mode=mode,
-                    gesture_strength=gesture_strength,
-                    beats_per_bar=beats_per_bar,
-                    bars_per_phrase=bars_per_phrase,
-                    section_bars=section_bars,
+                    motion=self._motion_config(pitch, energy, subdivision), preset=preset, strength=strength, mode=mode,
+                    gesture_strength=gesture_strength, beats_per_bar=beats_per_bar, bars_per_phrase=bars_per_phrase, section_bars=section_bars,
                 )
                 analysis = analyze_multiaxis(data, config)
                 plan = plan_multiaxis(data, config)
@@ -310,6 +284,7 @@ class MultiAxisWindow(tk.Tk):
         self.data = data
         self.plan = plan
         self.analysis = analysis
+        self.generated_config = config
         self.duration = plan_duration(plan)
         for button in (self.generate_button, self.export_button, self.tcode_export_button, self.play_button):
             button.configure(state="normal")
@@ -326,6 +301,15 @@ class MultiAxisWindow(tk.Tk):
                 t = np.asarray([at for at, _ in actions], dtype=np.float64)
                 p = np.asarray([pos for _, pos in actions], dtype=np.float64)
                 self.axes.plot(t, p, linewidth=0.9, label=f"{axis} {AXIS_CHANNELS[axis]}")
+
+        beats = np.asarray(data.get("beats", []), dtype=np.float64).reshape(-1)
+        if analysis and beats.size:
+            for section in analysis.sections:
+                if 0 <= section.start_beat < beats.size:
+                    at = float(beats[section.start_beat])
+                    self.axes.axvline(at, linewidth=0.6, alpha=0.25)
+                    self.axes.text(at, 99.0, section.label, rotation=90, va="top", ha="right", fontsize=7, alpha=0.7)
+
         self.axes.set_ylim(0, 100)
         self.axes.set_xlabel("Time (s)")
         self.axes.set_ylabel("Normalized position")
@@ -335,8 +319,8 @@ class MultiAxisWindow(tk.Tk):
         duration = float(data.get("at", 0.0) or self.duration)
         counts = "/".join(str(len(plan[axis])) for axis in AXIS_ORDER)
         self.status_var.set(
-            f"Ready — {duration:.1f}s, mode={config.mode}, preset={config.preset}, "
-            f"gesture={config.gesture_strength:.2f}, L0 pitch={pitch:.1f}, energy={energy:.2f}"
+            f"Ready — {duration:.1f}s, mode={config.mode}, preset={config.preset}, gesture={config.gesture_strength:.2f}, "
+            f"L0 pitch={pitch:.1f}, energy={energy:.2f}"
         )
         self.summary_label.configure(text=f"actions L0..R2: {counts}")
 
@@ -348,31 +332,38 @@ class MultiAxisWindow(tk.Tk):
         self.status_var.set(f"Generation failed: {exc}")
         messagebox.showerror("PythonDancer", f"Generation failed:\n{exc}")
 
+    def _export_metadata(self) -> dict[str, object]:
+        config = self.generated_config
+        analysis = self.analysis
+        if config is None or analysis is None:
+            return {"notes": "planner=multiaxis"}
+        return {
+            "notes": (
+                f"planner=multiaxis; mode={config.mode}; preset={config.preset}; gesture_strength={config.gesture_strength}; "
+                f"axis_strength={config.strength}"
+            ),
+            "choreography_sections": analysis.summary(),
+            "choreography": {
+                "mode": config.mode,
+                "preset": config.preset,
+                "axis_strength": float(config.strength),
+                "gesture_strength": float(config.gesture_strength),
+                "analysis": analysis.to_dict(),
+            },
+        }
+
     def export(self):
         if not self.plan or not self.source_path:
             return
         selected = filedialog.asksaveasfilename(
-            title="Export six-axis funscript bundle",
-            defaultextension=".funscript",
+            title="Export six-axis funscript bundle", defaultextension=".funscript",
             initialfile=self.source_path.with_suffix(".funscript").name,
             filetypes=[("Funscript", "*.funscript"), ("All files", "*.*")],
         )
         if not selected:
             return
         try:
-            summary = self.analysis.summary() if self.analysis else ""
-            written = export_funscript_bundle(
-                selected,
-                self.plan,
-                metadata={
-                    "notes": (
-                        f"planner=multiaxis; mode={self.mode_var.get()}; preset={self.preset_var.get()}; "
-                        f"gesture_strength={float(self.gesture_strength_var.get())}; axis_strength={float(self.strength_var.get())}"
-                    ),
-                    "choreography_sections": summary,
-                },
-                manifest=not self.args.no_manifest,
-            )
+            written = export_funscript_bundle(selected, self.plan, metadata=self._export_metadata(), manifest=not self.args.no_manifest)
         except Exception as exc:
             messagebox.showerror("PythonDancer", f"Export failed:\n{exc}")
             return
@@ -383,9 +374,7 @@ class MultiAxisWindow(tk.Tk):
         if not self.plan or not self.source_path:
             return
         selected = filedialog.asksaveasfilename(
-            title="Export scheduled TCode script",
-            defaultextension=".tcode",
-            initialfile=default_tcode_path(self.source_path).name,
+            title="Export scheduled TCode script", defaultextension=".tcode", initialfile=default_tcode_path(self.source_path).name,
             filetypes=[("TCode script", "*.tcode"), ("All files", "*.*")],
         )
         if not selected:
@@ -425,12 +414,7 @@ class MultiAxisWindow(tk.Tk):
                     profile = device.profile()
                     self.device_profile = profile
                     controller = TCodePlaybackController(
-                        self.plan,
-                        device,
-                        speed=speed,
-                        profile=profile,
-                        use_device_ranges=use_ranges,
-                        seek_ramp_ms=seek_ramp_ms,
+                        self.plan, device, speed=speed, profile=profile, use_device_ranges=use_ranges, seek_ramp_ms=seek_ramp_ms,
                     )
                     self.active_controller = controller
                     summary = self._profile_summary(profile)
@@ -525,5 +509,4 @@ def ux(args):
 
 if __name__ == "__main__":
     from .util import cli_args
-
     ux(cli_args().parse_args())
