@@ -2,12 +2,13 @@
 
 Demucs is deliberately optional. PythonDancer remains lightweight by default:
 users may provide an existing stem directory, let PythonDancer invoke an
-installed Demucs package, or keep stem analysis disabled.
+installed Demucs package/executable, or keep stem analysis disabled.
 """
 from __future__ import annotations
 
 from importlib.util import find_spec
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from typing import Mapping
@@ -17,8 +18,17 @@ import numpy as np
 STEM_NAMES = ("drums", "bass", "vocals", "other")
 
 
+def _demucs_prefix() -> list[str] | None:
+    executable = shutil.which("demucs")
+    if executable:
+        return [executable]
+    if not getattr(sys, "frozen", False) and find_spec("demucs") is not None:
+        return [sys.executable, "-m", "demucs.separate"]
+    return None
+
+
 def demucs_available() -> bool:
-    return find_spec("demucs") is not None
+    return _demucs_prefix() is not None
 
 
 def find_stem_files(root: str | Path) -> dict[str, Path]:
@@ -49,8 +59,9 @@ def separate_with_demucs(
     source = Path(source)
     if not source.exists():
         raise FileNotFoundError(source)
-    if not demucs_available():
-        raise RuntimeError("Demucs is not installed. Install it separately or pass --stem_dir with existing stems.")
+    prefix = _demucs_prefix()
+    if prefix is None:
+        raise RuntimeError("Demucs is not available. Install it separately or pass --stem_dir with existing stems.")
 
     cache = Path(cache_dir)
     expected = cache / model / source.stem
@@ -59,16 +70,7 @@ def separate_with_demucs(
         return existing
 
     cache.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "-m",
-        "demucs.separate",
-        "-n",
-        str(model),
-        "-o",
-        str(cache),
-        str(source),
-    ]
+    command = prefix + ["-n", str(model), "-o", str(cache), str(source)]
     subprocess.run(command, check=True)
     found = find_stem_files(expected)
     if len(found) < len(STEM_NAMES):
@@ -146,7 +148,7 @@ def enrich_with_stems(
 
     mode:
       off      - never inspect stems;
-      auto     - use supplied stems, otherwise Demucs only when installed;
+      auto     - use supplied stems, otherwise Demucs only when available;
       required - fail when four stems cannot be obtained.
     """
     if mode not in ("off", "auto", "required"):
