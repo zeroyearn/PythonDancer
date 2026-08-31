@@ -129,6 +129,16 @@ def _multi_config(args, motion: MotionConfig) -> MultiAxisConfig:
     )
 
 
+def _choreography_metadata(config: MultiAxisConfig, analysis) -> dict[str, object]:
+    return {
+        "mode": config.mode,
+        "preset": config.preset,
+        "axis_strength": float(config.strength),
+        "gesture_strength": float(config.gesture_strength),
+        "analysis": analysis.to_dict(),
+    }
+
+
 def cmd(args):
     if args.list_ports:
         try:
@@ -252,6 +262,7 @@ def cmd(args):
                 print("No actions could be generated from this input.")
                 return 2
             summary = analysis.summary()
+            choreography = _choreography_metadata(config, analysis)
             written = export_funscript_bundle(
                 out_file,
                 plan,
@@ -262,6 +273,7 @@ def cmd(args):
                         f"axis_strength={args.axis_strength}"
                     ),
                     "choreography_sections": summary,
+                    "choreography": choreography,
                 },
                 manifest=not args.no_manifest,
             )
