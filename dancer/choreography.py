@@ -63,6 +63,16 @@ class SectionSpan:
     def beat_count(self) -> int:
         return max(0, self.end_beat - self.start_beat)
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "start_beat": int(self.start_beat),
+            "end_beat": int(self.end_beat),
+            "label": self.label,
+            "energy": float(self.energy),
+            "activity": float(self.activity),
+            "novelty": float(self.novelty),
+        }
+
 
 @dataclass(frozen=True)
 class ChoreographyAnalysis:
@@ -77,14 +87,23 @@ class ChoreographyAnalysis:
     def summary(self) -> str:
         if not self.sections:
             return ""
-        parts: list[str] = []
+        groups: list[tuple[str, int, int]] = []
         for section in self.sections:
-            token = f"{section.label}:{section.start_beat}-{section.end_beat}"
-            if parts and parts[-1].split(":", 1)[0] == section.label:
-                parts[-1] = token
+            if groups and groups[-1][0] == section.label:
+                label, start, _ = groups[-1]
+                groups[-1] = (label, start, section.end_beat)
             else:
-                parts.append(token)
-        return " | ".join(parts)
+                groups.append((section.label, section.start_beat, section.end_beat))
+        return " | ".join(f"{label}:{start}-{end}" for label, start, end in groups)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "beats_per_bar": int(self.beats_per_bar),
+            "bars_per_phrase": int(self.bars_per_phrase),
+            "section_bars": int(self.section_bars),
+            "summary": self.summary(),
+            "sections": [section.to_dict() for section in self.sections],
+        }
 
 
 def _feature(data: Mapping, name: str, length: int, fallback: str | None = None) -> np.ndarray:
@@ -204,11 +223,7 @@ def detect_sections(
     bars_per_phrase: int = 4,
     section_bars: int = 4,
 ) -> ChoreographyAnalysis:
-    """Detect coarse phrase-level song sections using beat-aligned dynamics/novelty.
-
-    This is intentionally deterministic and lightweight: it is a musical-intent
-    heuristic, not a semantic music classifier. Boundaries are phrase aligned.
-    """
+    """Detect coarse phrase-level song sections using beat-aligned dynamics/novelty."""
     if beats_per_bar <= 0 or bars_per_phrase <= 0 or section_bars <= 0:
         raise ValueError("musical grid values must be positive")
     beats = np.asarray(data.get("beats", []), dtype=np.float64).reshape(-1)
@@ -264,7 +279,6 @@ def detect_sections(
             label = "chorus"
         else:
             label = "verse"
-
         spans.append(SectionSpan(int(item["start"]), int(item["end"]), label, e, a, n))
 
     return ChoreographyAnalysis(tuple(spans), beats_per_bar, bars_per_phrase, section_bars)
@@ -470,14 +484,10 @@ def synthesize_choreography_signals(
 
     results: dict[str, np.ndarray] = {}
     for axis in SECONDARY_AXES:
-        # Reactive detail preserves local audio coupling while gesture intent owns
-        # the larger musical movement.
         signal = 0.34 * reactive[axis] + 0.66 * gesture_strength * gesture_mix[axis]
         signal *= section_gain
         results[axis] = signal
 
-    # Explicit cross-axis coupling creates coherent 6D poses instead of five
-    # unrelated curves: sway counter-roll, surge counter-pitch, and twist/stroke.
     results["R1"] = results["R1"] - 0.24 * results["L2"]
     results["R2"] = results["R2"] - 0.20 * results["L1"]
     results["R0"] = results["R0"] + 0.12 * stroke
