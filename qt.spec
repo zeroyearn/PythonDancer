@@ -22,6 +22,7 @@ hiddenimports = sorted(set(
 		"dancer.safety",
 		"dancer.project",
 		"dancer.outputs",
+		"dancer.tcode_speed",
 	]
 ))
 
