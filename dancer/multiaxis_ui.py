@@ -1,4 +1,4 @@
-"""Tk GUI for six-axis choreography, export, and TCode playback."""
+"""Tk GUI for six-axis choreography, style learning, stems, and TCode playback."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +13,8 @@ from matplotlib.figure import Figure
 from .libfun import autoval, load_audio_data
 from .motion import MotionConfig
 from .multiaxis import AXIS_CHANNELS, AXIS_ORDER, MultiAxisConfig, analyze_multiaxis, export_funscript_bundle, plan_multiaxis
+from .stems import enrich_with_stems
+from .style import learn_profile_from_bundle, load_profile, save_profile
 from .tcode import SerialTCodeDevice, TCodePlaybackController, build_tcode_events, default_tcode_path, export_tcode_script, list_serial_ports, plan_duration
 
 
@@ -34,8 +36,8 @@ class MultiAxisWindow(tk.Tk):
         self.duration = 0.0
 
         self.title("PythonDancer - Six-axis choreography")
-        self.geometry("1280x980")
-        self.minsize(1060, 800)
+        self.geometry("1360x1040")
+        self.minsize(1120, 840)
 
         self.path_var = tk.StringVar(value=str(self.source_path or ""))
         self.preset_var = tk.StringVar(value=args.multiaxis_preset)
@@ -48,6 +50,11 @@ class MultiAxisWindow(tk.Tk):
         self.bars_per_phrase_var = tk.IntVar(value=args.bars_per_phrase)
         self.section_bars_var = tk.IntVar(value=args.section_bars)
         self.section_summary_var = tk.StringVar(value="Structure: not analyzed")
+        self.profile_path_var = tk.StringVar(value=args.profile or "")
+        self.reference_bundle_var = tk.StringVar(value=args.reference_bundle or "")
+        self.stem_mode_var = tk.StringVar(value=args.stems)
+        self.stem_dir_var = tk.StringVar(value=args.stem_dir or "")
+        self.style_summary_var = tk.StringVar(value="Style: built-in · stems off")
         self.status_var = tk.StringVar(value="Select media and generate a six-axis plan.")
         self.port_var = tk.StringVar(value=args.serial_port or "")
         self.baud_var = tk.IntVar(value=args.baud)
@@ -104,8 +111,28 @@ class MultiAxisWindow(tk.Tk):
         ttk.Spinbox(choreography, textvariable=self.section_bars_var, from_=1, to=16, increment=1, width=4).grid(row=0, column=9, padx=(6, 16))
         ttk.Label(choreography, textvariable=self.section_summary_var).grid(row=1, column=0, columnspan=11, sticky="ew", pady=(8, 0))
 
+        style = ttk.LabelFrame(controls, text="Style learning & separated stems", padding=8)
+        style.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        style.columnconfigure(1, weight=1)
+        style.columnconfigure(5, weight=1)
+        ttk.Label(style, text="Profile").grid(row=0, column=0, sticky="w")
+        ttk.Entry(style, textvariable=self.profile_path_var).grid(row=0, column=1, sticky="ew", padx=(6, 6))
+        ttk.Button(style, text="Browse", command=self.browse_profile).grid(row=0, column=2, padx=(0, 14))
+        ttk.Label(style, text="Reference bundle").grid(row=0, column=3, sticky="w")
+        ttk.Entry(style, textvariable=self.reference_bundle_var).grid(row=0, column=4, columnspan=2, sticky="ew", padx=(6, 6))
+        ttk.Button(style, text="Browse", command=self.browse_reference).grid(row=0, column=6, padx=(0, 6))
+        self.save_profile_button = ttk.Button(style, text="Save learned profile", command=self.save_generated_profile, state="disabled")
+        self.save_profile_button.grid(row=0, column=7)
+
+        ttk.Label(style, text="Stems").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(style, textvariable=self.stem_mode_var, values=("off", "auto", "required"), state="readonly", width=10).grid(row=1, column=1, sticky="w", padx=(6, 14), pady=(8, 0))
+        ttk.Label(style, text="Stem directory").grid(row=1, column=2, sticky="w", pady=(8, 0))
+        ttk.Entry(style, textvariable=self.stem_dir_var).grid(row=1, column=3, columnspan=3, sticky="ew", padx=(6, 6), pady=(8, 0))
+        ttk.Button(style, text="Browse", command=self.browse_stem_dir).grid(row=1, column=6, padx=(0, 6), pady=(8, 0))
+        ttk.Label(style, textvariable=self.style_summary_var).grid(row=2, column=0, columnspan=8, sticky="ew", pady=(8, 0))
+
         device = ttk.LabelFrame(controls, text="TCode v0.3 device", padding=8)
-        device.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        device.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         device.columnconfigure(1, weight=1)
         device.columnconfigure(7, weight=1)
         ttk.Label(device, text="Serial port").grid(row=0, column=0, sticky="w")
@@ -161,6 +188,40 @@ class MultiAxisWindow(tk.Tk):
             self.source_path = Path(path)
             self.path_var.set(path)
             self.generate()
+
+    def browse_profile(self):
+        path = filedialog.askopenfilename(title="Open choreography profile", filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if path:
+            self.profile_path_var.set(path)
+            self.reference_bundle_var.set("")
+
+    def browse_reference(self):
+        path = filedialog.askopenfilename(title="Select reference L0 funscript", filetypes=[("Funscript", "*.funscript"), ("All files", "*.*")])
+        if path:
+            self.reference_bundle_var.set(path)
+            self.profile_path_var.set("")
+
+    def browse_stem_dir(self):
+        path = filedialog.askdirectory(title="Select drums/bass/vocals/other stem directory")
+        if path:
+            self.stem_dir_var.set(path)
+            if self.stem_mode_var.get() == "off":
+                self.stem_mode_var.set("auto")
+
+    def save_generated_profile(self):
+        config = self.generated_config
+        if config is None or config.profile is None:
+            messagebox.showwarning("PythonDancer", "Generate with a profile or reference bundle first.")
+            return
+        selected = filedialog.asksaveasfilename(title="Save choreography profile", defaultextension=".json", initialfile="python-dancer-profile.json", filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if not selected:
+            return
+        try:
+            path = save_profile(selected, config.profile)
+        except Exception as exc:
+            messagebox.showerror("PythonDancer", f"Profile save failed:\n{exc}")
+            return
+        self.status_var.set(f"Saved choreography profile to {path}")
 
     def refresh_ports(self, silent: bool = False):
         try:
@@ -248,19 +309,37 @@ class MultiAxisWindow(tk.Tk):
             messagebox.showerror("PythonDancer", "Strengths must be non-negative and musical-grid values must be positive integers.")
             return
 
+        profile_path = self.profile_path_var.get().strip()
+        reference_bundle = self.reference_bundle_var.get().strip()
+        if profile_path and reference_bundle:
+            messagebox.showerror("PythonDancer", "Choose either a Profile or a Reference bundle, not both.")
+            return
         preset = self.preset_var.get()
         mode = self.mode_var.get()
         subdivision = int(self.subdivision_var.get())
         automap = bool(self.automap_var.get())
+        stem_mode = self.stem_mode_var.get()
+        stem_dir = self.stem_dir_var.get().strip() or None
+        if stem_dir and stem_mode == "off":
+            stem_mode = "auto"
         self.source_path = source
-        self.status_var.set("Analyzing musical structure and planning six axes...")
+        self.status_var.set("Analyzing musical structure, style, and six-axis motion...")
         self.section_summary_var.set("Structure: analyzing...")
-        for button in (self.generate_button, self.export_button, self.tcode_export_button, self.play_button):
+        self.style_summary_var.set("Style: analyzing...")
+        for button in (self.generate_button, self.export_button, self.tcode_export_button, self.play_button, self.save_profile_button):
             button.configure(state="disabled")
 
         def work():
             try:
+                if reference_bundle:
+                    style_profile = learn_profile_from_bundle(reference_bundle, name=self.args.profile_name)
+                elif profile_path:
+                    style_profile = load_profile(profile_path)
+                else:
+                    style_profile = None
                 data = load_audio_data(source, plp=not self.args.no_plp)
+                if stem_mode != "off":
+                    data = enrich_with_stems(data, source, mode=stem_mode, stem_dir=stem_dir, cache_dir=self.args.stem_cache, model=self.args.demucs_model)
                 pitch = float(self.args.pitch)
                 energy = float(self.args.energy)
                 if automap:
@@ -268,6 +347,7 @@ class MultiAxisWindow(tk.Tk):
                 config = MultiAxisConfig(
                     motion=self._motion_config(pitch, energy, subdivision), preset=preset, strength=strength, mode=mode,
                     gesture_strength=gesture_strength, beats_per_bar=beats_per_bar, bars_per_phrase=bars_per_phrase, section_bars=section_bars,
+                    profile=style_profile,
                 )
                 analysis = analyze_multiaxis(data, config)
                 plan = plan_multiaxis(data, config)
@@ -288,12 +368,16 @@ class MultiAxisWindow(tk.Tk):
         self.duration = plan_duration(plan)
         for button in (self.generate_button, self.export_button, self.tcode_export_button, self.play_button):
             button.configure(state="normal")
+        self.save_profile_button.configure(state="normal" if config.profile is not None else "disabled")
         self.timeline_scale.configure(to=max(0.001, self.duration))
         self.timeline_var.set(float(np.clip(self.timeline_var.get(), 0.0, self.duration)))
         self._update_timeline_label()
 
         summary = analysis.summary() if analysis else ""
         self.section_summary_var.set(f"Structure: {summary or 'no sections detected'}")
+        profile_name = config.profile.name if config.profile is not None else "built-in"
+        stem_status = data.get("stem_analysis", {}).get("status", "off") if isinstance(data.get("stem_analysis"), dict) else "off"
+        self.style_summary_var.set(f"Style: {profile_name} · stems {stem_status}")
         self.axes.clear()
         for axis in AXIS_ORDER:
             actions = plan[axis]
@@ -319,16 +403,17 @@ class MultiAxisWindow(tk.Tk):
         duration = float(data.get("at", 0.0) or self.duration)
         counts = "/".join(str(len(plan[axis])) for axis in AXIS_ORDER)
         self.status_var.set(
-            f"Ready — {duration:.1f}s, mode={config.mode}, preset={config.preset}, gesture={config.gesture_strength:.2f}, "
-            f"L0 pitch={pitch:.1f}, energy={energy:.2f}"
+            f"Ready — {duration:.1f}s, mode={config.mode}, preset={config.preset}, profile={profile_name}, "
+            f"gesture={config.gesture_strength:.2f}, L0 pitch={pitch:.1f}, energy={energy:.2f}"
         )
         self.summary_label.configure(text=f"actions L0..R2: {counts}")
 
     def _generation_failed(self, exc: Exception):
         self.generate_button.configure(state="normal")
-        for button in (self.export_button, self.tcode_export_button, self.play_button):
+        for button in (self.export_button, self.tcode_export_button, self.play_button, self.save_profile_button):
             button.configure(state="disabled")
         self.section_summary_var.set("Structure: generation failed")
+        self.style_summary_var.set("Style: generation failed")
         self.status_var.set(f"Generation failed: {exc}")
         messagebox.showerror("PythonDancer", f"Generation failed:\n{exc}")
 
@@ -337,19 +422,24 @@ class MultiAxisWindow(tk.Tk):
         analysis = self.analysis
         if config is None or analysis is None:
             return {"notes": "planner=multiaxis"}
+        choreography = {
+            "mode": config.mode,
+            "preset": config.preset,
+            "axis_strength": float(config.strength),
+            "gesture_strength": float(config.gesture_strength),
+            "analysis": analysis.to_dict(),
+        }
+        if config.profile is not None:
+            choreography["profile"] = config.profile.to_dict()
+        if self.data is not None and isinstance(self.data.get("stem_analysis"), dict):
+            choreography["stems"] = dict(self.data["stem_analysis"])
         return {
             "notes": (
                 f"planner=multiaxis; mode={config.mode}; preset={config.preset}; gesture_strength={config.gesture_strength}; "
-                f"axis_strength={config.strength}"
+                f"axis_strength={config.strength}; profile={config.profile.name if config.profile else 'built-in'}"
             ),
             "choreography_sections": analysis.summary(),
-            "choreography": {
-                "mode": config.mode,
-                "preset": config.preset,
-                "axis_strength": float(config.strength),
-                "gesture_strength": float(config.gesture_strength),
-                "analysis": analysis.to_dict(),
-            },
+            "choreography": choreography,
         }
 
     def export(self):
