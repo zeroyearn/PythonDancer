@@ -1,8 +1,8 @@
-# PythonDancer 2.2
+# PythonDancer 2.3
 
-PythonDancer turns audio or video soundtracks into single- or six-axis `.funscript` motion and can stream the generated six-axis motion directly to TCode v0.3 devices.
+PythonDancer turns audio or video soundtracks into single- or six-axis `.funscript` motion and can stream generated motion directly to TCode v0.3 devices.
 
-This fork keeps the original workflow but replaces the old amplitude mapping with a beat-aware planner, adds SR6/OSR6 six-axis motion, a musical choreography engine, D2-aware TCode playback, and a seekable device timeline.
+This fork keeps the original workflow but replaces the old amplitude mapping with a beat-aware planner, SR6/OSR6 six-axis choreography, editable/learnable style profiles, optional separated-stem analysis, D2-aware TCode playback, and a seekable device timeline.
 
 > Upstream: `NodudeWasTaken/PythonDancer`, itself a Python port of `ncdxncdx/FunscriptDancer`.
 
@@ -30,18 +30,32 @@ This fork keeps the original workflow but replaces the old amplitude mapping wit
 
 ### 2.2 — musical choreography
 
-The default secondary-axis planner is now a choreography engine instead of a fixed reactive formula set.
-
-It adds:
-
 - continuous beat / bar / phrase phase;
-- phrase-aligned section detection: `intro`, `verse`, `build`, `chorus`, `drop`, `breakdown`, `outro`;
-- reusable multi-axis gestures: `pulse`, `sway`, `rock`, `circle`, `spiral`, `wave`, `accent`;
+- phrase-aligned `intro / verse / build / chorus / drop / breakdown / outro` detection;
+- reusable gestures: `pulse / sway / rock / circle / spiral / wave / accent`;
 - section-dependent gesture selection and gain;
-- explicit cross-axis coupling for coherent 6D poses;
-- `balanced`, `rhythm`, and `expressive` gesture styles;
-- `reactive` compatibility mode for A/B comparison;
-- choreography structure stored in funscript metadata and `.motion.json`.
+- explicit cross-axis 6D pose coupling;
+- `balanced / rhythm / expressive` styles;
+- `reactive` compatibility mode;
+- choreography analysis persisted in `.motion.json`.
+
+### 2.3 — style learning + stem-aware choreography
+
+2.3 adds a portable style layer above the 2.2 choreography engine.
+
+- editable JSON choreography profiles;
+- statistical style learning from an existing six-axis funscript bundle;
+- learned per-axis travel/amplitude;
+- learned smooth-vs-accent character;
+- learned L2↔R1, L1↔R2 and L0↔R0 relationship strength;
+- profile-controlled gesture weights, section gains, reactive/gesture mix and smoothing;
+- optional `drums / bass / vocals / other` stem enrichment;
+- optional Demucs invocation when Demucs is installed;
+- direct support for an existing stem directory without Demucs;
+- full GUI controls for Profile / Reference bundle / Stems;
+- learned profiles can be saved and reused on new tracks.
+
+Reference learning is statistical style transfer, not semantic imitation or model training. The new song keeps its own beat, bar, phrase and section timing; the reference supplies movement character.
 
 ## Install
 
@@ -63,6 +77,8 @@ python -m pytest
 
 FFmpeg is recommended for media containers. `pyserial` is included for serial TCode playback.
 
+Demucs is intentionally **not** a required dependency. The official Meta Demucs repository is archived, so PythonDancer treats it as an optional external accelerator. If an importable `demucs` package exists, `--stems auto|required` may invoke it. Otherwise provide an existing stem directory or keep stems off.
+
 ## Run
 
 Single-axis GUI:
@@ -71,7 +87,7 @@ Single-axis GUI:
 python -m dancer
 ```
 
-Six-axis choreography GUI:
+Six-axis GUI:
 
 ```bash
 python -m dancer scene.mp4 --multiaxis
@@ -83,72 +99,60 @@ Six-axis CLI:
 python -m dancer scene.mp4 --cli --yes --multiaxis
 ```
 
-## Choreography architecture
+## 2.3 architecture
 
 ```text
-Audio / video soundtrack
-        │
-        ├─ beat / tempo / PLP
-        ├─ RMS energy
-        ├─ onset
-        ├─ bass / mid / high
-        ├─ pitch
-        ├─ harmonic
-        └─ percussive
-        │
-        ▼
-Beat-aligned feature stream
-        │
-        ├──────────────► L0 adaptive planner
-        │                    │
-        │                    ▼
-        │              L0 action timeline
-        │
-        ▼
-Musical Grid
-  beat phase
-  bar phase
-  phrase phase
-        │
-        ▼
+Audio / video
+      │
+      ├─ beat / tempo / PLP
+      ├─ RMS / onset
+      ├─ bass / mid / high
+      ├─ pitch / harmonic / percussive
+      │
+      ├──────── optional stems ────────┐
+      │        drums / bass            │
+      │        vocals / other          │
+      │                                │
+      ▼                                ▼
+Beat-aligned feature stream + optional stem features
+      │
+      ├──────────────► L0 adaptive planner
+      │                    │
+      │                    ▼
+      │              L0 action timeline
+      │
+      ▼
+Beat / bar / phrase phase
+      │
+      ▼
 Section Analyzer
-  intro / verse / build / chorus
-  drop / breakdown / outro
-        │
-        ▼
+      │
+      ▼
 Gesture Planner
-  pulse / sway / rock / circle
-  spiral / wave / accent
-        │
-        ▼
-6D Pose Synthesis
-  L1 / L2 / R0 / R1 / R2
-        │
-        ▼
-Cross-axis coupling
-        │
-        ▼
+      │
+      ├──────── Choreography Profile
+      │          axis scale
+      │          gesture gain
+      │          section gain
+      │          coupling gain
+      │          smoothing
+      │          stem influence
+      │
+      ▼
+6D pose synthesis
+      │
+      ▼
 Per-axis physical constraints
-        │
-        ▼
+      │
+      ▼
 Funscript bundle / TCode
 ```
 
-L0 still owns the action timestamps. The choreography engine evaluates beat/bar/phrase phase and musical sections on that timeline, then creates coordinated secondary-axis poses.
+## Musical choreography
 
-## Musical phase
+The default secondary-axis planner uses the actual musical timeline rather than `action_index × π`.
 
-The old 2.1 secondary planner used an action-index phase such as `action_index × π`. 2.2 uses the actual beat timestamps instead.
-
-The engine maintains three continuous coordinates:
-
-```text
-beat_phase    position inside one beat
-bar_phase     position inside one bar
-phrase_phase  position inside a multi-bar phrase
-```
-
-Default grid:
+Default musical grid:
 
 ```text
 beats_per_bar   = 4
@@ -156,7 +160,7 @@ bars_per_phrase = 4
 section_bars    = 4
 ```
 
-Override from CLI:
+Override it:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis \
@@ -165,77 +169,41 @@ python -m dancer song.mp3 --cli --yes --multiaxis \
   --section_bars 4
 ```
 
-## Section detection
-
-Section detection is a deterministic musical-intent heuristic, not a semantic ML classifier. It compares phrase-window energy, rhythmic activity, novelty, and within-window dynamics.
-
-Typical output:
-
-```text
-intro → verse → build → drop → verse → chorus → breakdown → chorus → outro
-```
-
-Show the detected structure:
+Show detected sections:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis --show_sections
 ```
 
-The GUI shows the same structure after generation.
+The section analyzer is a deterministic musical-intent heuristic based on energy, rhythmic activity, novelty and local dynamic slope. It is not a semantic music classifier.
 
 ## Gesture primitives
 
-The choreography engine blends reusable multi-axis gestures instead of calculating every axis independently.
-
-### `pulse`
-
-Beat-driven rotational/accent motion. Strongest contribution is usually R0 with smaller L1/L2/R1/R2 support.
-
-### `sway`
-
-Bar-scale left/right movement. L2 and R1 are deliberately counter-coupled.
-
-### `rock`
-
-Forward/back movement: L1 and R2 move as a coupled pair.
-
-### `circle`
-
-L1/L2 use quadrature phase to create a circular translation pattern while R1/R2 follow the pose.
-
-### `spiral`
-
-Phrase-scale twist with slower L2/R2 support. Used more heavily in chorus/drop and expressive mode.
-
-### `wave`
-
-Slow phrase motion dominated by R1/R2. Favored in intro/breakdown/outro.
-
-### `accent`
-
-Transient, alternating-direction motion driven by onset/percussive energy. Favored in rhythm and drop sections.
-
-## Section choreography
-
-Different sections choose different gesture mixtures and amplitude gains.
-
-Examples:
+The secondary axes are built from reusable 6D gestures:
 
 ```text
-intro       wave + rock, reduced gain
-verse       sway + rock + light pulse
-build       circle + pulse + spiral, rising activity
-chorus      circle + spiral + sway
-DROP        pulse + spiral + accent, highest gain
-breakdown   wave + rock, reduced gain
-outro       slow wave / sway, reduced gain
+pulse    beat-driven rotational/accent motion
+sway     bar-scale lateral movement
+rock     forward/back L1 + R2 movement
+circle   quadrature L1/L2 translation
+spiral   phrase-scale twist and support motion
+wave     slow R1/R2-dominant phrase motion
+accent   transient alternating-direction hit
 ```
 
-This is why 2.2 no longer looks like five unrelated audio-reactive curves.
+Typical section mixtures:
 
-## Cross-axis coupling
+```text
+intro       wave + rock
+verse       sway + rock + light pulse
+build       circle + pulse + spiral
+chorus      circle + spiral + sway
+DROP        pulse + spiral + accent
+breakdown   wave + rock
+outro       slow wave / sway
+```
 
-After gesture blending, the engine explicitly coordinates related axes:
+Cross-axis coupling is explicit:
 
 ```text
 L2 sway   <-> R1 counter-roll
@@ -244,7 +212,126 @@ L0 stroke -> R0 twist support
 bass/L0   -> small L1 correction
 ```
 
-The final five secondary signals are smoothed and then passed through the existing speed/acceleration constraint layer.
+## Choreography profiles
+
+A profile is ordinary JSON. See:
+
+```text
+examples/choreography-profile.json
+```
+
+The main fields are:
+
+```text
+axis_scale      per-axis amplitude multipliers
+                 L1 L2 R0 R1 R2
+
+gesture_gain    pulse sway rock circle spiral wave accent
+section_gain    intro verse build chorus drop breakdown outro
+coupling_gain   sway_roll surge_pitch stroke_twist stroke_bass_l1
+reactive_mix    0..1 local-reactive contribution
+smoothing       0..0.49 temporal smoothing
+stem_influence  0..3 separated-stem contribution
+```
+
+Use a profile:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --profile examples/choreography-profile.json
+```
+
+The GUI exposes a Profile field and file picker as well.
+
+## Learn style from a reference bundle
+
+Given an existing bundle:
+
+```text
+reference.funscript
+reference.surge.funscript
+reference.sway.funscript
+reference.twist.funscript
+reference.roll.funscript
+reference.pitch.funscript
+```
+
+learn and immediately apply its movement style:
+
+```bash
+python -m dancer new-song.mp3 --cli --yes --multiaxis \
+  --reference_bundle reference.funscript
+```
+
+Save the learned style for reuse:
+
+```bash
+python -m dancer new-song.mp3 --cli --yes --multiaxis \
+  --reference_bundle reference.funscript \
+  --profile_name my-style \
+  --save_learned_profile my-style.json
+```
+
+The learner measures robust secondary-axis travel, movement activity/smoothness and cross-axis correlations. It converts those statistics into a `ChoreographyProfile`; it does **not** copy timestamps or positions from the reference.
+
+The GUI has separate Profile and Reference bundle fields. They are mutually exclusive. A profile learned from a reference can be saved with **Save learned profile**.
+
+## Optional separated stems
+
+PythonDancer can use:
+
+```text
+drums.wav
+bass.wav
+vocals.wav
+other.wav
+```
+
+from an existing directory:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --stems auto \
+  --stem_dir ./stems/song
+```
+
+Or, if an importable Demucs installation is available:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --stems auto
+```
+
+Require stems and fail instead of falling back:
+
+```text
+--stems required
+```
+
+Disable completely:
+
+```text
+--stems off
+```
+
+Other controls:
+
+```text
+--stem_cache .dancer_stems
+--demucs_model htdemucs
+```
+
+Mapping inside the choreography layer:
+
+```text
+drums onset/energy -> onset + percussive activity
+bass energy        -> bass feature / L1 character
+vocals pitch       -> pitch-driven R0/R2 character
+vocals energy      -> harmonic character
+other energy       -> light global/phrase support
+```
+
+If stems are unavailable in `auto` mode, the normal 2.2 feature path remains active.
 
 ## Choreography controls
 
@@ -254,38 +341,27 @@ Default mode:
 --choreography_mode choreography
 ```
 
-A/B against the previous 2.1 formulas:
+A/B against the original fixed reactive formulas:
 
 ```bash
 python -m dancer scene.mp4 --cli --yes --multiaxis \
   --choreography_mode reactive
 ```
 
-Gesture contribution:
+Core controls:
 
 ```text
---gesture_strength 1.0
-```
-
-`0` keeps only the low-level reactive contribution inside choreography mode; values above `1` emphasize the gesture layer.
-
-Presets:
-
-```text
-balanced    general-purpose 6D motion
-rhythm      stronger pulse/accent/percussion response
-expressive  stronger circle/spiral/wave movement
-```
-
-Global secondary-axis amplitude remains controlled by:
-
-```text
+--multiaxis_preset balanced|rhythm|expressive
 --axis_strength 1.0
+--gesture_strength 1.0
+--beats_per_bar 4
+--bars_per_phrase 4
+--section_bars 4
 ```
 
 ## Six-axis output
 
-Default files:
+PythonDancer follows the standard MultiFunPlayer file naming convention:
 
 ```text
 scene.funscript          L0 / stroke
@@ -297,7 +373,7 @@ scene.pitch.funscript    R2 / pitch
 scene.motion.json        bundle/choreography manifest
 ```
 
-The manifest includes the generation metadata and detected section summary so a bundle can be inspected later.
+The manifest includes generation settings, complete section metrics, profile contents when used, and stem-analysis status.
 
 ## TCode v0.3 device layer
 
@@ -350,15 +426,13 @@ R0 2000 8000 Twist
 
 PythonDancer maps normalized `0..100` motion into each saved device range and only emits axes reported by D2.
 
-Example:
-
 ```text
 L0 0%   -> 1000
 L0 50%  -> 5000
 L0 100% -> 9000
 ```
 
-This is profile mapping only; it does not physically seek hardware end stops.
+This is profile/range mapping only; it does not physically seek hardware end stops.
 
 Disable D2 mapping with:
 
@@ -370,8 +444,8 @@ Disable D2 mapping with:
 
 The GUI playback controller supports:
 
-- **Pause** — captures timeline time and sends `DSTOP`; no position frame is emitted while paused.
-- **Resume** — synchronizes to the frozen pose and rebuilds future ramp-ahead events.
+- **Pause** — capture timeline time and send `DSTOP`; no position frame is emitted while paused.
+- **Resume** — synchronize to the frozen pose and rebuild future ramp-ahead events.
 - **Seek** — `DSTOP`, move to the selected pose using the configured seek ramp, then rebuild future events.
 - **STOP** — terminate playback and send `DSTOP`.
 
