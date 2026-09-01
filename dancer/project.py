@@ -11,9 +11,9 @@ import tempfile
 from typing import Any, Mapping
 
 from .multiaxis import AXIS_ORDER
-from .workspace import AxisControl, GestureBlock, SectionBlock, TimeRange, WorkspaceState, copy_plan
+from .workspace import AxisControl, GestureBlock, SectionBlock, TimeRange, WorkspaceState
 
-PROJECT_SCHEMA = 2
+PROJECT_SCHEMA = 3
 APP_DIR = Path.home() / ".pythondancer"
 AUTOSAVE_DIR = APP_DIR / "autosave"
 RECENT_FILE = APP_DIR / "recent.json"
@@ -64,6 +64,7 @@ class ProjectDocument:
     safety_settings: dict[str, Any] = field(default_factory=dict)
     device: dict[str, Any] = field(default_factory=dict)
     ui: dict[str, Any] = field(default_factory=dict)
+    quality_intelligence: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -79,6 +80,7 @@ class ProjectDocument:
             "safety_settings": deepcopy(self.safety_settings),
             "device": deepcopy(self.device),
             "ui": deepcopy(self.ui),
+            "quality_intelligence": deepcopy(self.quality_intelligence),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -86,7 +88,7 @@ class ProjectDocument:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ProjectDocument":
         schema = int(data.get("schema", 0))
-        if schema not in (1, PROJECT_SCHEMA):
+        if schema not in (1, 2, PROJECT_SCHEMA):
             raise ValueError(f"unsupported .pdance schema: {schema}")
         plan = {
             axis: [(float(item[0]), float(item[1])) for item in (data.get("base_plan") or {}).get(axis, [])]
@@ -102,6 +104,7 @@ class ProjectDocument:
             safety_settings=deepcopy(data.get("safety_settings") or {}),
             device=deepcopy(data.get("device") or {}),
             ui=deepcopy(data.get("ui") or {}),
+            quality_intelligence=deepcopy(data.get("quality_intelligence") or {}),
             created_at=str(data.get("created_at", "")) or datetime.now(timezone.utc).isoformat(),
             updated_at=str(data.get("updated_at", "")) or datetime.now(timezone.utc).isoformat(),
         )
