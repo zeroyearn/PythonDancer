@@ -125,12 +125,20 @@ def test_async_axis_projection_inserts_cross_clock_safety_keyframes():
         "R1": [(0.0, 50.0), (1.0, 100.0), (4.0, 50.0)],
         "R2": [(0.0, 50.0), (1.0, 0.0), (4.0, 50.0)],
     }
-    config = MechanicalProjectionConfig(max_risk=.45, servo_limit_deg=88.0)
+    # The default geometry reaches roughly 56° at the asynchronous 1s pose
+    # while neutral is only ~11°. A 50° limit therefore deterministically
+    # triggers projection without making neutral itself unsafe.
+    config = MechanicalProjectionConfig(max_risk=.45, servo_limit_deg=50.0)
+    before = mechanical_risk_at_pose({
+        "L0": 75.0, "L1": 100.0, "L2": 0.0,
+        "R0": 100.0, "R1": 100.0, "R2": 0.0,
+    }, config=config)
+    assert before.servo_margin_deg < 0.0
     projected, diagnostics = project_plan_to_safe(plan, config=config)
     assert diagnostics["projected_samples"] > 0
     assert diagnostics["inserted_keyframes"] > 0
     assert diagnostics["unsafe_ratio"] == 0.0
-    assert len(projected["L0"]) >= len(plan["L0"])
+    assert 1.0 in {at for at, _ in projected["L0"]}
 
 
 def test_mechanical_config_rejects_non_finite_values():
