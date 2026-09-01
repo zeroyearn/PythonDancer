@@ -1,6 +1,7 @@
 import json
 
-from dancer.project import ProjectDocument, UndoStack, load_project, save_project
+import dancer.project as project_mod
+from dancer.project import ProjectDocument, UndoStack, autosave_project, load_project, recent_projects, save_project
 from dancer.workspace import GestureBlock, SectionBlock, WorkspaceState
 
 
@@ -35,6 +36,40 @@ def test_pdance_round_trip(tmp_path):
     assert restored.workspace.axes["R0"].muted is True
     assert restored.curve_settings["interpolation"] == "pchip"
     assert restored.quality_intelligence["report"]["overall"] == 91.2
+
+
+def test_autosaves_do_not_enter_recents_and_same_stem_does_not_collide(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    monkeypatch.setattr(project_mod, "APP_DIR", app)
+    monkeypatch.setattr(project_mod, "AUTOSAVE_DIR", app / "autosave")
+    monkeypatch.setattr(project_mod, "RECENT_FILE", app / "recent.json")
+
+    first = ProjectDocument(media_path=str(tmp_path / "A" / "song.mp3"))
+    second = ProjectDocument(media_path=str(tmp_path / "B" / "song.mp3"))
+    first_path = autosave_project(first)
+    second_path = autosave_project(second)
+
+    assert first_path != second_path
+    assert first_path.name.startswith("song-")
+    assert second_path.name.startswith("song-")
+    assert recent_projects() == []
+
+
+def test_recent_projects_filters_legacy_autosave_entries(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    autosaves = app / "autosave"
+    autosaves.mkdir(parents=True)
+    monkeypatch.setattr(project_mod, "APP_DIR", app)
+    monkeypatch.setattr(project_mod, "AUTOSAVE_DIR", autosaves)
+    monkeypatch.setattr(project_mod, "RECENT_FILE", app / "recent.json")
+
+    normal = tmp_path / "real.pdance"
+    normal.write_text("{}", encoding="utf-8")
+    legacy_auto = autosaves / "song.autosave.pdance"
+    legacy_auto.write_text("{}", encoding="utf-8")
+    project_mod.RECENT_FILE.write_text(json.dumps([str(legacy_auto), str(normal)]), encoding="utf-8")
+
+    assert recent_projects() == [str(normal)]
 
 
 def test_schema_1_project_still_loads(tmp_path):
