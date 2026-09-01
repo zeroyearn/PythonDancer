@@ -23,6 +23,7 @@ hiddenimports = sorted(set(
         "dancer.cli_v26",
         "dancer.cli_v26_final",
         "dancer.cli_v26_release",
+        "dancer.cli_v27",
         "dancer.ui",
         "dancer.multiaxis_ui",
         "dancer.choreography",
@@ -37,6 +38,8 @@ hiddenimports = sorted(set(
         "dancer.workstation_ui_v26",
         "dancer.workstation_ui_v26_final",
         "dancer.workstation_ui_v26_release",
+        "dancer.workstation_ui_v27",
+        "dancer.workstation_ui_v27_release",
         "dancer.editing",
         "dancer.safety",
         "dancer.project",
@@ -52,8 +55,16 @@ hiddenimports = sorted(set(
         "dancer.geometry_profile",
         "dancer.i18n",
         "dancer.i18n_safe",
+        "dancer.i18n_v27",
+        "dancer.section_intent",
+        "dancer.mechanical_safety",
+        "dancer.quality",
+        "dancer.candidates",
+        "dancer.comparison",
+        "dancer.improvement",
     ]
 ))
+
 
 a = Analysis(
     [str(project_root / "macos_entry.py")],
@@ -97,8 +108,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "PythonDancer",
         "CFBundleName": "PythonDancer",
-        "CFBundleShortVersionString": "2.6.0",
-        "CFBundleVersion": "2.6.0",
+        "CFBundleShortVersionString": "2.7.0",
+        "CFBundleVersion": "2.7.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "NSHumanReadableCopyright": "PythonDancer contributors",
