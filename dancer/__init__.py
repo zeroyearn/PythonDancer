@@ -41,7 +41,7 @@ def main():
         return cmd(args)
 
     if args.multiaxis:
-        from .workstation_ui_v27_hotfix import ux
+        from .workstation_ui_v27_async import ux
         ux(args)
         return 0
 
