@@ -1,9 +1,4 @@
-"""Non-destructive editing model for PythonDancer's six-axis workstation.
-
-The workspace sits after automatic planning and before export/TCode. It owns
-manual sections, gesture overlays, selection, axis visibility/lock state, and
-range splicing so GUI edits always affect the effective exported plan.
-"""
+"""Non-destructive editing model for PythonDancer's six-axis workstation."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -59,6 +54,12 @@ class GestureBlock:
     end: float
     gesture: str
     strength: float = 1.0
+    axis_mix: Mapping[str, float] = field(default_factory=dict)
+    phase_offset: float = 0.0
+    cycles: float = 1.0
+    direction: int = 1
+    blend_in: float = 0.12
+    blend_out: float = 0.12
 
     def __post_init__(self):
         if self.gesture not in GESTURES:
@@ -67,6 +68,24 @@ class GestureBlock:
             raise ValueError("gesture end must be after start")
         if not np.isfinite(self.strength) or self.strength < 0:
             raise ValueError("gesture strength must be finite and non-negative")
+        if not np.isfinite(self.cycles) or self.cycles <= 0:
+            raise ValueError("gesture cycles must be positive")
+        if self.direction not in (-1, 1):
+            raise ValueError("gesture direction must be -1 or 1")
+        clean_mix = {}
+        for axis, value in dict(self.axis_mix or {}).items():
+            if axis not in AXIS_ORDER:
+                continue
+            number = float(value)
+            if np.isfinite(number):
+                clean_mix[axis] = float(np.clip(number, -3.0, 3.0))
+        self.axis_mix = clean_mix
+        self.phase_offset = float(self.phase_offset) % 1.0
+        self.blend_in = float(np.clip(self.blend_in, 0.0, 0.5))
+        self.blend_out = float(np.clip(self.blend_out, 0.0, 0.5))
+
+    def axis_multiplier(self, axis: str) -> float:
+        return float(self.axis_mix.get(axis, 1.0))
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -74,6 +93,12 @@ class GestureBlock:
             "end": float(self.end),
             "gesture": self.gesture,
             "strength": float(self.strength),
+            "axis_mix": dict(self.axis_mix),
+            "phase_offset": float(self.phase_offset),
+            "cycles": float(self.cycles),
+            "direction": int(self.direction),
+            "blend_in": float(self.blend_in),
+            "blend_out": float(self.blend_out),
         }
 
 
@@ -101,7 +126,6 @@ def sample_axis(actions: Sequence[tuple[float, float]], at: float, default: floa
 
 
 def splice_actions(current, replacement, start: float, end: float, *, blend: float = 0.25) -> list[tuple[float, float]]:
-    """Replace one time range and crossfade at both boundaries."""
     start, end = sorted((float(start), float(end)))
     if end <= start:
         return [(float(at), float(pos)) for at, pos in current]
@@ -161,7 +185,7 @@ def _gesture_delta(gesture: str, axis: str, phase: np.ndarray) -> np.ndarray:
         if axis == "R2": return .30 * np.cos(tau * phase)
         return .12 * np.sin(tau * phase)
     if gesture == "spiral":
-        growth = .35 + .65 * phase
+        growth = .35 + .65 * np.mod(phase, 1.0)
         weights = {"L0": .12, "L1": .72, "L2": .82, "R0": 1., "R1": -.40, "R2": .36}
         offsets = {"L0": 0., "L1": 0., "L2": .25, "R0": .5, "R1": .25, "R2": 0.}
         return weights[axis] * growth * np.sin(tau * (phase + offsets[axis]))
@@ -190,9 +214,16 @@ def apply_gesture_blocks(plan, blocks: Sequence[GestureBlock]):
             mask = (times >= block.start) & (times <= block.end)
             if not np.any(mask):
                 continue
-            phase = np.clip((times[mask] - block.start) / duration, 0.0, 1.0)
-            edge = np.sin(np.pi * phase) ** .6
-            values[mask] = np.clip(values[mask] + _gesture_delta(block.gesture, axis, phase) * edge * 12.0 * block.strength, 0., 100.)
+            local = np.clip((times[mask] - block.start) / duration, 0.0, 1.0)
+            phase = np.mod(block.phase_offset + block.direction * block.cycles * local, 1.0)
+            edge = np.ones_like(local)
+            if block.blend_in > 0:
+                edge *= np.clip(local / block.blend_in, 0.0, 1.0)
+            if block.blend_out > 0:
+                edge *= np.clip((1.0 - local) / block.blend_out, 0.0, 1.0)
+            edge = edge * edge * (3.0 - 2.0 * edge)
+            delta = _gesture_delta(block.gesture, axis, phase) * block.axis_multiplier(axis)
+            values[mask] = np.clip(values[mask] + delta * edge * 12.0 * block.strength, 0., 100.)
             result[axis] = list(zip(times.tolist(), values.tolist()))
     return result
 
@@ -243,9 +274,16 @@ class WorkspaceState:
             raise ValueError(f"unknown section label: {label}")
         self.sections[index].label = label
 
-    def add_gesture(self, start: float, end: float, gesture: str, strength: float = 1.0) -> GestureBlock:
+    def add_gesture(
+        self,
+        start: float,
+        end: float,
+        gesture: str,
+        strength: float = 1.0,
+        **kwargs,
+    ) -> GestureBlock:
         selected = TimeRange(start, end).normalized(self.duration)
-        block = GestureBlock(selected.start, selected.end, gesture, strength)
+        block = GestureBlock(selected.start, selected.end, gesture, strength, **kwargs)
         self.gestures.append(block)
         self.gestures.sort(key=lambda item: (item.start, item.end))
         return block
