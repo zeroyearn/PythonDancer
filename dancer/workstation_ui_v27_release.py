@@ -1,6 +1,7 @@
 """Release entry layer for the PythonDancer 2.7 bilingual workstation."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from threading import Event, Thread
 from tkinter import messagebox, ttk
@@ -14,7 +15,20 @@ from .intent import INTENT_FIELDS
 from .multiaxis import AXIS_ORDER
 from .quality import score_plan
 from .tcode import SerialTCodeDevice, TCodePlaybackController, encode_plan_frame
+from .workstation_ui_v25_final import _FullHistory
 from .workstation_ui_v27 import MultiAxisWindow as _QualityWindow
+
+
+class _QualityHistory(_FullHistory):
+    """2.7 history extends motion snapshots with generation/Intent state."""
+
+    @staticmethod
+    def capture(window):
+        snapshot = _FullHistory.capture(window)
+        snapshot["generated_config"] = deepcopy(getattr(window, "generated_config", None))
+        snapshot["section_intent_overrides"] = deepcopy(getattr(window, "section_intent_overrides", {}))
+        snapshot["improvement_history"] = deepcopy(getattr(window, "improvement_history", []))
+        return snapshot
 
 
 class MultiAxisWindow(_QualityWindow):
@@ -22,6 +36,7 @@ class MultiAxisWindow(_QualityWindow):
         self.serial_prestart_cancel = Event()
         install_v27_translations()
         super()._build_ui()
+        self.history = _QualityHistory(limit=100)
         self.title("PythonDancer 2.7 · Quality Intelligence Workstation")
         self.candidate_a_combo.bind("<<ComboboxSelected>>", self._candidate_selection_changed)
         self.candidate_b_combo.bind("<<ComboboxSelected>>", self._candidate_selection_changed)
@@ -30,6 +45,10 @@ class MultiAxisWindow(_QualityWindow):
             self.i18n.bind_object(self)
             self.i18n.refresh(force=True)
         self._refresh_quality_i18n()
+
+    def _generation_done(self, data, plan, analysis, config, pitch, energy):
+        super()._generation_done(data, plan, analysis, config, pitch, energy)
+        self.history = _QualityHistory(limit=100)
 
     def _install_mechanical_apply_button(self):
         stack = [self]
@@ -115,9 +134,17 @@ class MultiAxisWindow(_QualityWindow):
         self._refresh_section_intent_combo()
         self._sync_section_intent_ranges()
 
-    def _adopt_candidate_config(self, config):
-        """Keep the visible controls and subsequent regeneration on the same candidate character."""
-        config = replace(config, mechanical=self._mechanical_config(), geometry=self.sr6_geometry)
+    def apply_section_intent(self):
+        self._checkpoint()
+        return super().apply_section_intent()
+
+    def clear_section_intent(self):
+        self._checkpoint()
+        return super().clear_section_intent()
+
+    def _sync_generation_controls(self, config):
+        if config is None:
+            return
         self.generated_config = config
         self.preset_var.set(config.preset)
         self.strength_var.set(float(config.strength))
@@ -129,12 +156,34 @@ class MultiAxisWindow(_QualityWindow):
         self.pose_budget_var.set(float(config.optimizer.pose_budget))
         self.velocity_budget_var.set(float(config.optimizer.velocity_budget))
         self.optimizer_iterations_var.set(int(config.optimizer.iterations))
-        if hasattr(self, "intent_override_amount_var"):
-            self.intent_override_amount_var.set(float(config.independent.intent_override_amount))
-        if hasattr(self, "manual_intent_vars"):
-            for field in INTENT_FIELDS:
-                if field in config.independent.intent_override:
-                    self.manual_intent_vars[field].set(float(config.independent.intent_override[field]))
+        self.intent_override_amount_var.set(float(config.independent.intent_override_amount))
+        for field in INTENT_FIELDS:
+            if field in config.independent.intent_override:
+                self.manual_intent_vars[field].set(float(config.independent.intent_override[field]))
+        mechanical = config.mechanical
+        self.mechanical_projection_var.set(bool(mechanical.enabled))
+        self.mechanical_max_risk_var.set(float(mechanical.max_risk))
+        self.servo_limit_var.set(float(mechanical.servo_limit_deg))
+        self.singularity_sensitivity_var.set(float(mechanical.sensitivity_limit_deg_per_unit))
+
+    def _restore_snapshot(self, snapshot):
+        super()._restore_snapshot(snapshot)
+        config = deepcopy(snapshot.get("generated_config"))
+        if config is not None:
+            self._sync_generation_controls(config)
+        self.section_intent_overrides = deepcopy(snapshot.get("section_intent_overrides", {}))
+        self.improvement_history = deepcopy(snapshot.get("improvement_history", []))
+        self._refresh_section_intent_combo()
+        self._sync_section_intent_ranges()
+        self._apply_workspace(redraw=True)
+        self.score_current()
+        if self.quality_candidates:
+            self._refresh_candidate_scores(mark_changed=False)
+
+    def _adopt_candidate_config(self, config):
+        """Keep the visible controls and subsequent regeneration on the same candidate character."""
+        config = replace(config, mechanical=self._mechanical_config(), geometry=self.sr6_geometry)
+        self._sync_generation_controls(config)
 
     def _effective_candidate_plan(self, candidate):
         plan = {axis: list(candidate.plan.get(axis, ())) for axis in AXIS_ORDER}
@@ -231,8 +280,8 @@ class MultiAxisWindow(_QualityWindow):
         candidate = self._candidate_by_name(self.candidate_a_var.get() if which == "A" else self.candidate_b_var.get())
         if candidate is None or not self.workspace:
             return
-        self._adopt_candidate_config(candidate.config)
         self._checkpoint()
+        self._adopt_candidate_config(candidate.config)
         self.base_plan = self._effective_candidate_plan(candidate)
         self.preview_candidate_plan = None
         self._apply_workspace(redraw=True)
@@ -246,6 +295,7 @@ class MultiAxisWindow(_QualityWindow):
         except Exception as exc:
             messagebox.showerror("PythonDancer", str(exc))
             return
+        self._checkpoint()
         if self.generated_config is not None:
             self.generated_config = replace(self.generated_config, mechanical=mechanical, geometry=self.sr6_geometry)
         self.score_current()
@@ -375,6 +425,7 @@ class MultiAxisWindow(_QualityWindow):
         super()._load_project_document(project)
         state = project.quality_intelligence or {}
         raw_candidates = list(state.get("candidates", []) or [])
+        self.history = _QualityHistory(limit=100)
         if self.generated_config is None or not raw_candidates:
             return
 
