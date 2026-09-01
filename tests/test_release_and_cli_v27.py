@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from dancer.cli_v27 import _validate_args
+from dancer.improvement import ImprovementConfig
 
 
 def _args(**overrides):
@@ -44,6 +45,21 @@ def test_quality_cli_rejects_invalid_numeric_inputs(field, value):
 def test_quality_cli_accepts_valid_boundary_values():
     assert _validate_args(_args(quality_candidates=1, mechanical_max_risk=0.0, improve_target=0.0, improve_min_gain=0.0)) is None
     assert _validate_args(_args(quality_candidates=8, mechanical_max_risk=1.0, improve_target=100.0)) is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"target_score": float("nan")},
+        {"minimum_improvement": float("nan")},
+        {"minimum_improvement": float("inf")},
+        {"blend_seconds": float("nan")},
+        {"blend_seconds": float("inf")},
+    ],
+)
+def test_improvement_config_rejects_non_finite_thresholds(kwargs):
+    with pytest.raises(ValueError):
+        ImprovementConfig(**kwargs)
 
 
 def test_release_workflow_is_explicit_and_targets_27():
