@@ -35,11 +35,11 @@ def main():
     prepare_runtime_path()
     args = cli_args().parse_args()
     if args.cli:
-        from .cli_v26_final import cmd
+        from .cli_v26_release import cmd
         return cmd(args)
 
     if args.multiaxis:
-        from .workstation_ui_v26_final import ux
+        from .workstation_ui_v26_release import ux
         ux(args)
         return 0
 
