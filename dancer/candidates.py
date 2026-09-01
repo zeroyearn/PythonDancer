@@ -101,7 +101,14 @@ def generate_candidates(
     for spec in available[:count]:
         config = config_for_candidate(base_config, spec)
         plan = plan_multiaxis(data, config)
-        report = score_plan(plan, data, sections=sections, geometry=geometry, weights=weights)
+        report = score_plan(
+            plan,
+            data,
+            sections=sections,
+            geometry=geometry or config.geometry,
+            mechanical_config=config.mechanical,
+            weights=weights,
+        )
         results.append(CandidateResult(spec.name, config, plan, report))
     results.sort(key=lambda item: (-item.quality.overall, item.name))
     return results
