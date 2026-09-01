@@ -13,8 +13,11 @@ from .choreo_profile import synthesize_profiled_choreography
 from .features import safe_normalize
 from .independent_planner import IndependentAxisConfig, plan_independent_secondary_axes
 from .intent import IntentEnvelope, infer_motion_intent
+from .kinematics import SR6Geometry
+from .mechanical_safety import MechanicalProjectionConfig, project_plan_to_safe
 from .motion import MotionConfig, apply_constraints, plan_motion
 from .optimizer import OptimizerConfig, optimize_multiaxis
+from .section_intent import SectionIntentOverride, apply_section_intent_overrides
 from .style import ChoreographyProfile
 
 AXIS_ORDER = ("L0", "L1", "L2", "R0", "R1", "R2")
@@ -50,6 +53,9 @@ class MultiAxisConfig:
     profile: ChoreographyProfile | None = None
     independent: IndependentAxisConfig = field(default_factory=IndependentAxisConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    section_intents: tuple[SectionIntentOverride, ...] = ()
+    mechanical: MechanicalProjectionConfig = field(default_factory=MechanicalProjectionConfig)
+    geometry: SR6Geometry = field(default_factory=SR6Geometry)
 
     def __post_init__(self):
         if self.preset not in _PRESET_AMPLITUDES:
@@ -70,6 +76,12 @@ class MultiAxisConfig:
             raise TypeError("independent must be an IndependentAxisConfig")
         if not isinstance(self.optimizer, OptimizerConfig):
             raise TypeError("optimizer must be an OptimizerConfig")
+        if not isinstance(self.mechanical, MechanicalProjectionConfig):
+            raise TypeError("mechanical must be a MechanicalProjectionConfig")
+        if not isinstance(self.geometry, SR6Geometry):
+            raise TypeError("geometry must be an SR6Geometry")
+        if any(not isinstance(item, SectionIntentOverride) for item in self.section_intents):
+            raise TypeError("section_intents must contain SectionIntentOverride values")
 
 
 def _feature(data: Mapping, name: str, length: int, fallback: str | None = None) -> np.ndarray:
@@ -153,7 +165,8 @@ def analyze_multiaxis(data: Mapping, config: MultiAxisConfig) -> ChoreographyAna
 
 
 def analyze_intent(data: Mapping, config: MultiAxisConfig) -> IntentEnvelope:
-    return infer_motion_intent(data, analyze_multiaxis(data, config))
+    envelope = infer_motion_intent(data, analyze_multiaxis(data, config))
+    return apply_section_intent_overrides(envelope, config.section_intents)
 
 
 def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, config: MultiAxisConfig) -> dict[str, np.ndarray]:
@@ -204,7 +217,7 @@ def plan_multiaxis(data: Mapping, config: MultiAxisConfig) -> dict[str, list[tup
     axes: dict[str, list[tuple[float, float]]] = {"L0": l0}
     if config.mode == "choreography" and config.independent.enabled:
         analysis = analyze_multiaxis(data, config)
-        intent = infer_motion_intent(data, analysis)
+        intent = apply_section_intent_overrides(infer_motion_intent(data, analysis), config.section_intents)
         axes.update(plan_independent_secondary_axes(
             data,
             l0,
@@ -231,7 +244,17 @@ def plan_multiaxis(data: Mapping, config: MultiAxisConfig) -> dict[str, list[tup
             axes[axis] = apply_constraints(zip(action_times, targets[axis]), max_speed=speed_limit, max_acceleration=acceleration_limit, min_interval=config.motion.min_interval)
 
     optimizer = replace(config.optimizer, neutral=float(config.neutral))
-    return optimize_multiaxis(axes, optimizer)
+    optimized = optimize_multiaxis(axes, optimizer)
+    if not config.mechanical.enabled:
+        return optimized
+    mechanical = replace(config.mechanical, neutral=float(config.neutral))
+    projected, _ = project_plan_to_safe(optimized, config.geometry, mechanical)
+    # Projection can introduce a sharp local correction. Re-apply the existing
+    # kinematic optimizer, then project once more so the final trajectory is
+    # both jerk-limited and inside the mechanical safe set.
+    smoothed = optimize_multiaxis(projected, optimizer)
+    final, _ = project_plan_to_safe(smoothed, config.geometry, mechanical)
+    return final
 
 
 def validate_multiaxis(plan: Mapping[str, list[tuple[float, float]]]) -> None:
@@ -292,7 +315,7 @@ def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple
         l0_path = paths["L0"]
         manifest_path = l0_path.with_suffix(".motion.json")
         payload = {
-            "version": "1.4",
+            "version": "1.5",
             "metadata": dict(metadata or {}),
             "axes": {
                 axis: {"channel": AXIS_CHANNELS[axis], "description": AXIS_DESCRIPTIONS[axis], "file": paths[axis].name, "actions": len(plan[axis])}
