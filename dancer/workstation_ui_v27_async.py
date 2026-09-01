@@ -14,7 +14,7 @@ from .improvement import ImprovementConfig, auto_improve
 from .multiaxis import AXIS_ORDER, plan_multiaxis
 from .quality import score_plan
 from .workspace import copy_plan, splice_plan
-from .workstation_ui_v27_hotfix import MultiAxisWindow as _HotfixWindow
+from .workstation_ui_v27_hotfix import MultiAxisWindow as _HotfixWindow, _effective_output_snapshot
 
 
 def _plan_fingerprint(plan):
@@ -162,7 +162,21 @@ class MultiAxisWindow(_HotfixWindow):
         locked = tuple(self.workspace.locked_axes())
         sections = deepcopy(self._sections_payload())
         geometry = self.sr6_geometry
+        workspace = deepcopy(self.workspace)
+        curve_settings = deepcopy(self.curve_settings)
+        safety_settings = deepcopy(self.safety_settings)
         context = self._motion_state_fingerprint()
+
+        def score_transform(plan, scoring_config):
+            return _effective_output_snapshot(
+                plan,
+                scoring_config,
+                base_plan=base,
+                workspace=workspace,
+                curve_settings=curve_settings,
+                safety_settings=safety_settings,
+                data=data,
+            )
 
         def work():
             try:
@@ -174,6 +188,7 @@ class MultiAxisWindow(_HotfixWindow):
                     geometry=geometry,
                     sections=sections,
                     locked_axes=locked,
+                    score_transform=score_transform,
                 )
                 self.after(0, lambda: self._improvement_done_guarded(context, result))
             except Exception as exc:
