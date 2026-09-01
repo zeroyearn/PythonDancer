@@ -1,91 +1,309 @@
-# PythonDancer 2.5
+# PythonDancer 2.6
 
-PythonDancer turns audio or video soundtracks into editable single- or six-axis `.funscript` choreography and can stream the final motion to TCode v0.3 devices or Intiface Central / Buttplug devices.
+PythonDancer turns audio/video soundtracks into editable six-axis choreography for `L0/L1/L2/R0/R1/R2`, exports MultiFunPlayer-compatible funscript bundles/TCode, and can stream live motion through serial TCode or Intiface Central / Buttplug.
 
-This fork combines beat-aware motion generation, SR6/OSR6 six-axis choreography, learnable style profiles, optional separated stems, precision curve editing, non-destructive projects, motion diagnostics, cross-axis safety shaping, and live device playback.
+2.6 is the **Generation Quality** release: the secondary axes no longer need to share L0's keyframe clock. Optional stems, continuous Motion Intent, learned reference style, advanced gesture blocks and a 6D optimizer work together before the existing editing/safety/device layers.
 
 > Upstream: `NodudeWasTaken/PythonDancer`, itself a Python port of `ncdxncdx/FunscriptDancer`.
 
-## 2.5 — precision editing & safety
-
-2.5 extends the 2.4 choreography workstation with ten production-oriented capabilities:
-
-1. direct six-axis keyframe editing;
-2. Beat Snap and nearest/floor/ceil quantization;
-3. Linear / Smoothstep / PCHIP / Makima curve interpolation;
-4. six-axis Motion Heatmap plus combined Risk Heatmap;
-5. Smart Limit cross-axis envelopes with `safe / balanced / open` profiles;
-6. real Soft Start and optional Auto Home for live playback;
-7. music-aware `ambient / beat / repeat` gap filling;
-8. configurable Axis Linking with gain, delay, smoothing, position/velocity mode, and only-if-empty behavior;
-9. portable `.pdance` projects, autosave, recent-project tracking, and bounded Undo/Redo;
-10. Intiface Central / Buttplug protocol v4 output over WebSocket.
-
-The effective editing/output pipeline is:
+## 2.6 architecture
 
 ```text
 Audio / video
-     ↓
-Beat/bar/phrase analysis + optional stems
-     ↓
-Automatic six-axis choreography
-     ↓
-Base plan
-     ↓
-Workspace gestures / sections / Mute / Lock
-     ↓
-Keyframe + curve editing
-     ↓
-Axis Linking
-     ↓
-Music-aware Gap Fill
-     ↓
-Smart cross-axis limits
-     ↓
-Per-axis physical speed/acceleration constraints
-     ↓
-Preview / Funscript / TCode / Intiface
+    ↓
+Mixed features + optional Demucs/provided stems
+    ↓
+Beat / bar / phrase / section analysis
+    ↓
+Continuous Motion Intent
+ intensity · aggression · flow · complexity
+ symmetry · rotation · translation · accents
+    ↓
+Reference Style / ChoreographyProfile
+    ↓
+Independent axis event planners
+ L1 bass · L2 hi-hat · R0 vocal motion
+ R1 snare · R2 vocal energy
+    ↓
+Gesture planner / editable Gesture Timeline
+    ↓
+6D pose planner
+    ↓
+Cross-axis optimizer
+ pose load · simultaneous velocity
+ speed · acceleration · jerk
+    ↓
+2.5 editing & safety workstation
+    ↓
+Device calibration + latency compensation
+    ↓
+Funscript / TCode / Intiface
 ```
 
-Manual editing and safety shaping therefore affect the real exported or streamed plan, not only the preview.
+The exported funscript/TCode timeline remains canonical. Device calibration, measured latency, Soft Start and Auto Home are live-output policies unless explicitly saved as project metadata.
 
-## Previous engine layers
+## Main 2.6 capabilities
 
-### 2.0 — beat-aware L0
-- beat-aligned audio features and safe normalization;
-- onset, bass/mid/high, pitch, harmonic and percussive features;
-- adaptive `1x / 2x / 4x` subdivision;
-- speed / acceleration / minimum-interval constraints.
+### Independent six-axis timing
 
-### 2.1 — six-axis + TCode
-- L0 stroke, L1 surge, L2 sway, R0 twist, R1 roll, R2 pitch;
-- MultiFunPlayer-style six-file bundles;
-- TCode v0.3 export and serial playback;
-- D0/D1/D2 probing and saved-range mapping;
-- Play / Pause / Resume / Seek / DSTOP.
+L0 remains the primary adaptive stroke planner. In choreography mode, the five secondary axes now choose their own musically meaningful timestamps:
 
-### 2.2 — musical choreography
-- continuous beat / bar / phrase phase;
-- `intro / verse / build / chorus / drop / breakdown / outro` intent;
-- reusable six-axis gesture primitives;
-- explicit cross-axis coupling;
-- `balanced / rhythm / expressive` presets and `reactive` A/B mode.
+```text
+L0 stroke   primary beat/subdivision planner
+L1 surge    bass energy
+L2 sway     hi-hat/high-frequency activity
+R0 twist    vocal pitch motion
+R1 roll     snare/drum accents
+R2 pitch    vocal/harmonic energy
+```
 
-### 2.3 — style learning + stems
-- editable `ChoreographyProfile` JSON;
-- statistical style learning from existing six-axis bundles;
-- learned axis travel, smoothness/activity and cross-axis relationships;
-- optional `drums / bass / vocals / other` enrichment;
-- optional Demucs or direct existing-stem directories.
+Each axis may insert extra subdivisions when its source feature crosses the configured accent threshold. Section boundaries are also eligible synchronization points.
 
-### 2.4 — editable choreography workstation
-- waveform + beat + section + gesture timeline;
-- draggable section boundaries and labels;
-- Gesture Timeline Editor;
-- per-axis Solo / Mute / Lock;
-- selection-local regeneration with crossfade;
-- normalized live 3D six-axis pose preview;
-- post-edit physical constraint pass.
+Disable the layer for A/B testing:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis --no-independent-axes
+```
+
+Control density:
+
+```bash
+--axis_density 1.4
+--axis_accent_threshold 0.68
+```
+
+### Motion Intent
+
+PythonDancer infers an inspectable 0..1 intent envelope instead of mapping audio directly to fixed formulas:
+
+- `intensity`
+- `aggression`
+- `flow`
+- `complexity`
+- `symmetry`
+- `rotation_bias`
+- `translation_bias`
+- `accent_density`
+
+The workstation shows the global values. The planner samples the envelope at each axis's own timestamps.
+
+CLI:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis --show_intent
+```
+
+### Rich separated-stem features
+
+Stem mode remains optional. PythonDancer can consume an existing directory containing:
+
+```text
+drums.wav
+bass.wav
+vocals.wav
+other.wav
+```
+
+or use an externally installed Demucs backend in `auto` / `required` mode.
+
+2.6 extracts additional source-aware features:
+
+```text
+drums  energy · onset · kick proxy · snare proxy · hi-hat proxy
+bass   energy · onset · low-band energy
+vocals energy · pitch · pitch motion
+other  energy · spectral centroid
+```
+
+Example:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --stems auto --stem_dir ./stems/song
+```
+
+Demucs is deliberately not a mandatory package dependency. If it is unavailable, `auto` can fall back while `required` fails explicitly.
+
+### Multi-reference style learning
+
+A single reference bundle still works:
+
+```bash
+--reference_bundle favorite.funscript
+```
+
+2.6 also supports multiple bundles and weighted blending:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --reference_library ref-a.funscript ref-b.funscript ref-c.funscript \
+  --reference_weights 2 1 1 \
+  --save_learned_profile my-style.json
+```
+
+Optional deterministic style clustering:
+
+```bash
+--style_clusters 3
+```
+
+Cluster labels are derived from learned motion character, e.g. Smooth Flow, Rhythm Heavy, Rotation Heavy and Translation Heavy.
+
+Reference learning is statistical style transfer. New motion still follows the new track's beats, structure, stems and Motion Intent; reference timestamps are not copied onto the new song.
+
+### Advanced Gesture Timeline
+
+Gesture blocks support:
+
+```text
+pulse / sway / rock / circle / spiral / wave / accent
+strength
+per-axis mix L0..R2
+phase offset
+cycle count
+forward / reverse direction
+blend-in / blend-out
+```
+
+This makes the timeline closer to a choreography/DAW automation lane instead of a fixed gesture label list.
+
+`.pdance` schema 2 persists these fields. Schema 1 projects remain readable.
+
+### 6D optimizer + jerk limits
+
+After independent planning, PythonDancer projects the combined motion into a configurable safety/quality envelope:
+
+- normalized simultaneous 6D pose budget;
+- normalized simultaneous velocity budget;
+- per-axis maximum speed;
+- per-axis maximum acceleration;
+- per-axis maximum jerk.
+
+Defaults preserve the existing axis hierarchy:
+
+```text
+L0      speed 400   accel 2400   jerk 16000
+L1/L2   speed 180   accel 1000   jerk  7000
+R0      speed 300   accel 1800   jerk 12000
+R1/R2   speed 200   accel 1200   jerk  8000
+```
+
+CLI controls:
+
+```bash
+--pose_budget 1.85
+--velocity_budget 2.25
+--optimizer_iterations 3
+```
+
+Disable for A/B testing:
+
+```bash
+--no-motion-optimizer
+```
+
+## Device calibration and timing
+
+### DeviceCalibrationProfile
+
+A calibration JSON can define each axis's:
+
+```text
+minimum / maximum
+neutral
+inverted
+max_speed
+max_acceleration
+max_jerk
+```
+
+Normalized choreography is mapped piecewise around the configured neutral:
+
+```text
+0   → minimum
+50  → neutral
+100 → maximum
+```
+
+The workstation can run a conservative one-axis-at-a-time ±5% verification sequence. Keep access to device STOP/emergency power during any hardware test.
+
+CLI:
+
+```bash
+--calibration_profile my-sr6.json
+```
+
+### Latency compensation
+
+Live playback can schedule commands earlier by a configured transport/device latency:
+
+```bash
+--latency_ms 45
+--manual_offset_ms -8
+```
+
+For serial devices, PythonDancer can estimate request/response timing using harmless `D1` queries and use half the median RTT as a one-way scheduling estimate:
+
+```bash
+--measure_latency
+```
+
+The timing profile records latency and jitter. Mechanical latency may differ from protocol RTT, so manual offset remains available.
+
+## 2.5 editing & safety layer retained
+
+2.6 keeps the full 2.5 workstation:
+
+- direct keyframe add/drag/delete;
+- Beat Snap / nearest / floor / ceil quantization;
+- Linear / Smoothstep / PCHIP / Makima interpolation;
+- Motion Heatmap and combined Risk Heatmap;
+- Smart Limit `safe / balanced / open` profiles;
+- music-aware ambient/beat/repeat gap filling;
+- Axis Link gain/delay/smoothing/position-or-velocity/only-if-empty;
+- Soft Start and optional Auto Home;
+- `.pdance` projects, autosave, recent projects and full Undo/Redo;
+- Intiface Central / Buttplug v4;
+- exception-safe serial DSTOP behavior;
+- speed-aware TCode `I<ms>` scaling while safety ramps stay real-time.
+
+## Workstation layout
+
+Run:
+
+```bash
+python -m dancer scene.mp4 --multiaxis
+```
+
+The GUI keeps the 2.4/2.5 workflow and adds:
+
+```text
+Left
+  Motion setup
+  Musical intelligence
+  Axis controls
+  Safety & shaping
+  Generation Quality
+
+Center
+  Motion plots
+  Wave/Section/Gesture timeline
+  3D pose
+  Curve editor
+  Diagnostics
+  Intent / Gesture
+
+Right
+  Local regenerate
+  TCode device
+  Export
+  Project
+  Intiface
+  Playback safety
+  Timing & calibration
+```
+
+Generation Quality exposes independent-axis density/threshold, optimizer budgets/passes and the current Motion Intent. The Intent/Gesture tab exposes advanced gesture block settings.
 
 ## Install
 
@@ -100,7 +318,7 @@ python -m venv .venv
 pip install -e .
 ```
 
-Enable Intiface support in a source install:
+Intiface support for source installs:
 
 ```bash
 pip install -e '.[intiface]'
@@ -113,220 +331,81 @@ pip install -e '.[test,intiface]'
 python -m pytest
 ```
 
-Desktop release builds install the Intiface extra automatically. FFmpeg is bundled in macOS release apps and is recommended for source installs that process media containers. `pyserial` is a normal dependency. Demucs remains optional/external.
+Desktop release builds install Intiface support automatically. macOS release apps bundle FFmpeg. Demucs remains optional/external.
 
-## Run
+## CLI examples
 
-Single-axis GUI:
-
-```bash
-python -m dancer
-```
-
-Six-axis 2.5 workstation:
+Default 2.6 six-axis generation:
 
 ```bash
-python -m dancer scene.mp4 --multiaxis
+python -m dancer song.mp3 --cli --yes --multiaxis
 ```
 
-Six-axis CLI:
+Stem-aware expressive choreography:
 
 ```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --multiaxis_preset expressive \
+  --stems auto \
+  --gesture_strength 1.25 \
+  --axis_density 1.2
 ```
 
-## Workstation
+Inspect sections and Motion Intent:
 
-### Motion + Timeline
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --show_sections --show_intent
+```
 
-The six independent motion plots remain:
+TCode live playback with calibration/latency:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --serial_port /dev/ttyUSB0 \
+  --calibration_profile my-sr6.json \
+  --latency_ms 30 \
+  --measure_latency
+```
+
+Intiface:
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis \
+  --intiface --intiface_address ws://127.0.0.1:12345
+```
+
+## Output bundle
 
 ```text
-L0 stroke     R0 twist
-L1 surge      R1 roll
-L2 sway       R2 pitch
+scene.funscript        L0 stroke
+scene.surge.funscript  L1 surge
+scene.sway.funscript   L2 sway
+scene.twist.funscript  R0 twist
+scene.roll.funscript   R1 roll
+scene.pitch.funscript  R2 pitch
+scene.motion.json      manifest / generation metadata
 ```
 
-The timeline combines:
+The 2.6 manifest is version `1.4` and may include section analysis, Motion Intent, independent-axis settings, optimizer settings, learned profile and stem-analysis metadata.
 
-```text
-Wave      waveform + beat grid
-Section   intro / verse / build / chorus / drop / breakdown / outro
-Gesture   pulse / sway / rock / circle / spiral / wave / accent
-```
+## TCode and live safety
 
-- drag empty waveform space to select a range;
-- drag section dividers to correct boundaries;
-- click a section to relabel it;
-- add, move, resize, or delete gesture blocks;
-- locally regenerate only the selected time range;
-- locked axes remain unchanged during local regeneration.
+TCode v0.3 support includes:
 
-Axis semantics:
+- D0/D1/D2 discovery;
+- D2 saved-range mapping;
+- multi-axis ramp commands;
+- scheduled `.tcode` export;
+- Play / Pause / Resume / Seek;
+- `DSTOP` on stop/interruption and best-effort `DSTOP` on exceptional serial-context exit;
+- live playback-speed-aware `I<ms>` intervals;
+- Soft Start synchronization;
+- optional Auto Home.
 
-```text
-Solo   preview only; never removes an axis from export/device output
-Mute   removes that axis from export and live device playback
-Lock   preserves that axis during local regeneration
-```
-
-If L0 is muted, TCode uses the remaining active axes as its timing source.
-
-### Curve editor
-
-Select any of `L0 / L1 / L2 / R0 / R1 / R2` and edit its actual keyframes:
-
-- double-click to insert a keyframe;
-- drag a point to change time and position;
-- delete the selected point;
-- Smooth a selected range;
-- Flatten a selected range;
-- Scale amplitude around neutral;
-- apply positional Offset;
-- Snap to Beat while editing;
-- Quantize selected keyframes using `nearest`, `floor`, or `ceil`.
-
-Per-axis interpolation modes:
-
-```text
-linear
-smoothstep
-pchip
-makima
-```
-
-PCHIP and Makima use SciPy interpolation and are resampled before the final physical constraint pass.
-
-### Diagnostics
-
-The Diagnostics tab shows:
-
-```text
-L0 motion intensity
-L1 motion intensity
-L2 motion intensity
-R0 motion intensity
-R1 motion intensity
-R2 motion intensity
-combined RISK
-```
-
-Risk estimates combine:
-
-- normalized travel/excursion;
-- per-axis velocity;
-- per-axis acceleration;
-- L2/R1 and L1/R2 coupled excursion;
-- simultaneous six-axis normalized velocity load.
-
-The heatmap is a planning diagnostic, not a substitute for the real device's mechanical limits.
-
-## Smart Limit
-
-Smart Limit operates before the final per-axis constraint pass.
-
-Profiles:
-
-```text
-safe      strongest coupled-pose and simultaneous-velocity restriction
-balanced  default workstation envelope
-open      wider coupled-pose and concurrent-motion budget
-```
-
-Examples of enforced relationships include:
-
-- extreme L0 travel scales back R0/R1;
-- extreme L1 travel scales back R2;
-- L2 + R1 share a combined excursion budget;
-- simultaneous multi-axis motion shares a normalized velocity budget.
-
-## Gap filling
-
-Long gaps can be filled without replacing the surrounding generated motion:
-
-```text
-none      leave gaps untouched
-ambient   low-amplitude alternating motion
-beat      stronger beat-aligned continuation
-repeat    reuse the preceding motion character
-```
-
-Existing beat timestamps are preferred; a fallback temporal grid is used when no beat falls inside the gap.
-
-## Axis Linking
-
-Axis Linking can derive or blend one axis from another.
-
-Controls:
-
-```text
-Source -> Target
-Gain
-Delay (ms)
-Smoothing 0..1
-Mode: position / velocity
-Only-if-empty
-```
-
-Example concepts:
-
-```text
-L2 -> R1   gain -0.35   counter-roll
-L1 -> R2   gain  0.25   surge/pitch coupling
-L0 -> R0   velocity     motion-reactive twist
-```
-
-Links are applied before Smart Limit and before the final physical constraint pass.
-
-## `.pdance` projects
-
-A `.pdance` project persists the editable session rather than only the final six files.
-
-It stores:
-
-- media path;
-- base six-axis plan;
-- workspace sections and gesture blocks;
-- selection and Solo/Mute/Lock state;
-- generation configuration and choreography profile;
-- per-axis curve/interpolation settings;
-- Smart Limit / Gap Fill / Axis Link / playback-safety settings;
-- serial and Intiface connection preferences;
-- analysis data needed to reopen the editing workspace.
-
-Project writes are atomic. Autosaves are stored under:
-
-```text
-~/.pythondancer/autosave/
-```
-
-Recent projects are tracked in:
-
-```text
-~/.pythondancer/recent.json
-```
-
-Undo/Redo snapshots cover the editable plan, workspace, curve settings, and safety shaping state.
-
-## Live playback safety
-
-### Soft Start
-
-For TCode playback from timeline zero, PythonDancer sends a real ramped pose command before normal playback begins. Seeking from another time uses at least the configured Soft Start duration as its synchronization ramp.
-
-For Intiface POSITION_WITH_DURATION devices, the start pose is likewise entered over the Soft Start interval while vibration/rotation outputs remain off.
-
-### Auto Home
-
-When enabled, a neutral-return keyframe is appended to the **live playback plan only**. It is not written into the canonical exported `.funscript` or scheduled `.tcode` files.
-
-The same principle applies to Soft Start: exported scripts preserve the authored timeline; playback safety is a transport policy.
-
-Unexpected TCode playback errors attempt `DSTOP`, and normal completion also stops the serial device after the final transition.
+When L0 is muted, remaining axes can provide the TCode event timeline.
 
 ## Intiface / Buttplug
-
-PythonDancer 2.5 supports Intiface Central over WebSocket using the Buttplug protocol v4 Python client.
 
 Default server:
 
@@ -334,141 +413,38 @@ Default server:
 ws://127.0.0.1:12345
 ```
 
-The current generic mapping is:
+Generic mapping currently uses:
 
 ```text
-L0 position                  -> POSITION_WITH_DURATION
-six-axis motion intensity    -> VIBRATE
-absolute R0 excursion        -> ROTATE
+L0 position               → POSITION_WITH_DURATION
+six-axis motion intensity → VIBRATE
+absolute R0 excursion     → ROTATE
 ```
 
-Unsupported device outputs are skipped.
+Unsupported outputs are skipped.
 
-GUI workflow:
+## macOS packaging
+
+Release builds target native:
 
 ```text
-Start Intiface Central
-→ Scan
-→ choose device
-→ Play
+macOS arm64
+macOS Intel x86_64
 ```
 
-CLI:
+FFmpeg is bundled. Builds are ad-hoc signed but not Apple-notarized; first launch may require Control-click/right-click → **Open**.
 
-```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis --intiface
-```
+## Development status
 
-Choose a device/address and safety settings:
-
-```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis \
-  --intiface \
-  --intiface_address ws://127.0.0.1:12345 \
-  --intiface_device 1 \
-  --soft_start_ms 900 \
-  --home_ms 900
-```
-
-A single CLI invocation intentionally allows only one live transport: either `--serial_port` or `--intiface`.
-
-## TCode v0.3
-
-Export scheduled TCode:
-
-```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis --tcode
-```
-
-List / inspect serial devices:
-
-```bash
-python -m dancer --cli --list_ports
-python -m dancer --cli --serial_port COM4 --device_info
-```
-
-Live serial playback with safety timing:
-
-```bash
-python -m dancer scene.mp4 --cli --yes --multiaxis \
-  --serial_port COM4 \
-  --soft_start_ms 900 \
-  --auto_home \
-  --home_ms 800
-```
-
-D2 saved ranges map normalized `0..100` motion into device preferences and unsupported axes are filtered.
-
-## Choreography profiles
-
-See `examples/choreography-profile.json`.
+2.6 is developed on top of the fully validated 2.5 branch. Before merge/release, the final 2.6 head must pass:
 
 ```text
-axis_scale      per-axis amplitude
-gesture_gain    gesture weights
-section_gain    section intensity
-coupling_gain   cross-axis coupling
-reactive_mix    reactive contribution
-smoothing       temporal smoothing
-stem_influence  separated-stem contribution
+Python 3.10 tests
+Python 3.12 tests
+Python 3.13 tests
+Windows PyInstaller build
+macOS arm64 app/ZIP/DMG build
+macOS Intel x86_64 app/ZIP/DMG build
 ```
 
-Use a profile:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis --profile examples/choreography-profile.json
-```
-
-Learn style from a reference bundle:
-
-```bash
-python -m dancer new-song.mp3 --cli --yes --multiaxis --reference_bundle reference.funscript
-```
-
-## Optional stems
-
-Existing directories may contain:
-
-```text
-drums.wav
-bass.wav
-vocals.wav
-other.wav
-```
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis --stems auto --stem_dir ./stems/song
-```
-
-Or use optional Demucs when available:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis --stems auto
-```
-
-## Six-axis output
-
-```text
-scene.funscript          L0 / stroke
-scene.surge.funscript    L1 / surge
-scene.sway.funscript     L2 / sway
-scene.twist.funscript    R0 / twist
-scene.roll.funscript     R1 / roll
-scene.pitch.funscript    R2 / pitch
-scene.motion.json        choreography/workspace manifest
-```
-
-## Physical limits
-
-After curve editing, gap filling, axis linking, Smart Limit, and workspace overlays, the final authoritative pass reapplies:
-
-```text
-L0     400 units/s, 2400 units/s²
-L1/L2  180 units/s, 1000 units/s²
-R0     300 units/s, 1800 units/s²
-R1/R2  200 units/s, 1200 units/s²
-```
-
-## Validation
-
-GitHub Actions covers Python 3.10 / 3.12 / 3.13, Windows PyInstaller packaging, and native macOS Apple Silicon / Intel packaging. The 2.5 regression suite includes keyframe operations, quantization/interpolation, safety heatmaps, coupled Smart Limits, simultaneous velocity budgets, Axis Link modes/delay, Gap Fill, Soft Start/Auto Home helpers, `.pdance` round trips, Intiface frame mapping and soft-start sequencing, plus the existing choreography/profile/stem/TCode/D2/playback/workspace tests.
+Do not treat an intermediate feature-branch artifact as a published release until the tagged GitHub Release exists.
