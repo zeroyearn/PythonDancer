@@ -23,12 +23,7 @@ def ffmpeg_conv(in_file, out_file):
 
 
 def cli_args():
-    parser = argparse.ArgumentParser(
-        prog="python-dancer",
-        description="Create single- or six-axis funscripts from audio using beat-aware choreography",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
+    parser = argparse.ArgumentParser(prog="python-dancer", description="Create single- or six-axis funscripts from audio using beat-aware choreography", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio_path", nargs="?", default=None, help="Path to input media")
     parser.add_argument("--out_path", help="Path to export funscript or multi-axis bundle prefix")
     parser.add_argument("--csv", help="Export as CSV instead of funscript (single-axis only)", action="store_true")
@@ -76,6 +71,9 @@ def cli_args():
     multi.add_argument("--pose_budget", type=float, default=1.85, metavar="[0+]", help="Maximum normalized simultaneous 6D pose load")
     multi.add_argument("--velocity_budget", type=float, default=2.25, metavar="[0+]", help="Maximum normalized simultaneous six-axis velocity load")
     multi.add_argument("--optimizer_iterations", type=int, default=3, metavar="N", help="Projection passes for cross-axis/jerk optimization")
+    multi.add_argument("--intent_override_amount", type=float, default=0.0, metavar="[0-1]", help="Blend inferred Motion Intent toward manual intent values")
+    for name in ("intensity", "aggression", "flow", "complexity", "symmetry", "rotation_bias", "translation_bias", "accent_density"):
+        multi.add_argument(f"--intent_{name}", type=float, default=.5, metavar="[0-1]", help=f"Manual Motion Intent value: {name.replace('_', ' ')}")
     multi.add_argument("--no_manifest", action="store_true", help="Do not write the .motion.json bundle manifest")
 
     tcode = parser.add_argument_group("TCode v0.3 device output")
@@ -109,7 +107,6 @@ def cli_args():
     parser.add_argument("--auto_speed", type=float, default=250.0, metavar="[0+]", help="Target action speed in units/s")
     parser.add_argument("--auto_per", type=float, default=65.0, metavar="[0-100]", help="Target percent of actions above target speed")
     parser.add_argument("--auto_mod", type=int, default=2, choices=(1, 2, 3), help="Optimizer objective: mean speed, high-speed share, or travel length")
-
     parser.add_argument("--pitch", type=float, default=100.0, metavar="[-200-200]", help="Pitch-to-center range")
     parser.add_argument("--energy", type=float, default=1.0, metavar="[0+]", help="Energy-to-range multiplier")
     parser.add_argument("--amplitude_centering", type=float, default=0.0, metavar="[-200-200]", help="Energy-based center shift")
