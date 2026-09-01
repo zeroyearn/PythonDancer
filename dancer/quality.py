@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import exp
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -11,6 +10,7 @@ from .features import safe_normalize
 from .kinematics import AXES, SR6Geometry
 from .mechanical_safety import MechanicalProjectionConfig, trajectory_mechanical_risk
 from .optimizer import DEFAULT_ACCEL, DEFAULT_JERK, DEFAULT_SPEED
+from .plan_window import slice_plan
 
 METRICS = (
     "rhythm_alignment",
@@ -241,14 +241,6 @@ def _stem_score(data: Mapping | None, beats: np.ndarray, times: np.ndarray, velo
     return float(np.clip(50.0 + 50.0 * np.mean(correlations), 0.0, 100.0))
 
 
-def _slice_plan(plan: Mapping[str, Sequence[tuple[float, float]]], start: float, end: float) -> dict[str, list[tuple[float, float]]]:
-    result = {}
-    for axis in AXES:
-        rows = [(float(t), float(p)) for t, p in plan.get(axis, ()) if start <= float(t) <= end]
-        result[axis] = [(t - start, p) for t, p in rows]
-    return result
-
-
 def _weak_windows(plan, data, sections, geometry, mech_config, window_seconds: float, threshold: float) -> tuple[QualityWindow, ...]:
     duration = _duration(plan, data)
     if duration <= window_seconds * 0.75:
@@ -257,7 +249,7 @@ def _weak_windows(plan, data, sections, geometry, mech_config, window_seconds: f
     start = 0.0
     while start < duration:
         end = min(duration, start + window_seconds)
-        local_plan = _slice_plan(plan, start, end)
+        local_plan = slice_plan(plan, start, end, rebase=True)
         local_data = {}
         if data:
             beats = np.asarray(data.get("beats", []), dtype=np.float64).reshape(-1)
