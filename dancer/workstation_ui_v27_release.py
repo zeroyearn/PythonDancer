@@ -71,6 +71,9 @@ class MultiAxisWindow(_QualityWindow):
         if self.quality_worker and self.quality_worker.is_alive():
             messagebox.showwarning("PythonDancer", "Finish the current Quality Intelligence task before generating a new track.")
             return
+        if (self.device_worker and self.device_worker.is_alive()) or (self.intiface_worker and self.intiface_worker.is_alive()):
+            messagebox.showwarning("PythonDancer", "Stop device playback before generating another track.")
+            return
         return super().generate()
 
     def generate_quality_candidates(self):
@@ -319,7 +322,8 @@ class MultiAxisWindow(_QualityWindow):
                     profile = device.profile()
                     self.device_profile = profile
                     controller_profile = profile if use_ranges else None
-                    if soft_start_ms > 0 and start_at <= 1e-9:
+                    cancelled = self.serial_prestart_cancel.is_set()
+                    if not cancelled and soft_start_ms > 0 and start_at <= 1e-9:
                         device.stop()
                         command = encode_plan_frame(
                             device_plan,
@@ -327,7 +331,7 @@ class MultiAxisWindow(_QualityWindow):
                             profile=controller_profile,
                             interval_ms=soft_start_ms,
                         )
-                        if command:
+                        if command and not self.serial_prestart_cancel.is_set():
                             device.send(command)
                             cancelled = self.serial_prestart_cancel.wait(soft_start_ms / 1000.0)
                     if self.serial_prestart_cancel.is_set():
