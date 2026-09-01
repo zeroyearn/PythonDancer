@@ -39,3 +39,20 @@ def test_seek_sync_keeps_real_safety_ramp_unscaled():
     controller._sync_position(0.5)
     assert "I120" in device.sent[-1]
     assert "I60" not in device.sent[-1]
+
+
+def test_stop_requested_before_play_is_sticky():
+    plan = {
+        "L0": [(0.0, 20.0), (0.05, 80.0)],
+        "L1": [], "L2": [], "R0": [], "R1": [], "R2": [],
+    }
+    device = FakeDevice()
+    controller = SpeedAwareTCodePlaybackController(plan, device, speed=1.0, seek_ramp_ms=0)
+    controller.stop()
+    sent_before = list(device.sent)
+
+    controller.play()
+
+    assert controller.state == "stopped"
+    assert device.sent == sent_before
+    assert device.stop_count >= 2
