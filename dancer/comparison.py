@@ -9,6 +9,7 @@ import numpy as np
 from .candidates import CandidateResult
 from .kinematics import AXES, SR6Geometry
 from .mechanical_safety import MechanicalProjectionConfig
+from .plan_window import slice_plan
 from .quality import QualityReport, score_plan
 from .workspace import splice_plan
 
@@ -79,13 +80,6 @@ def _range(section) -> tuple[float, float]:
     return float(section.start), float(section.end)
 
 
-def _slice_plan(plan, start: float, end: float):
-    result = {}
-    for axis in AXES:
-        result[axis] = [(float(t) - start, float(p)) for t, p in plan.get(axis, ()) if start <= float(t) <= end]
-    return result
-
-
 def _slice_data(data: Mapping | None, start: float, end: float) -> dict:
     if not data:
         return {}
@@ -141,10 +135,14 @@ def best_section_merge(
     section_scores: dict[int, list[float]] = {}
     for index, section in enumerate(sections):
         start, end = _range(section)
+        if end <= start:
+            section_scores[index] = [0.0 for _ in candidates]
+            choices[index] = 0
+            continue
         local_data = _slice_data(data, start, end)
         scores = []
         for candidate in candidates:
-            local = _slice_plan(candidate.plan, start, end)
+            local = slice_plan(candidate.plan, start, end, rebase=True)
             effective_geometry = geometry or candidate.config.geometry
             effective_mechanical = mechanical_config or candidate.config.mechanical
             scores.append(float(score_plan(
