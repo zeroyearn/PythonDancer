@@ -3,10 +3,11 @@ import pytest
 
 from dancer.candidates import generate_candidates
 from dancer.editing import CurveSettings
+from dancer.improvement import ImprovementConfig, auto_improve
 from dancer.mechanical_safety import MechanicalProjectionConfig
 from dancer.motion import MotionConfig
 from dancer.multiaxis import AXIS_ORDER, MultiAxisConfig
-from dancer.quality import _slice_sections
+from dancer.quality import _slice_sections, score_plan
 from dancer.safety import SafetySettings
 from dancer.workspace import WorkspaceState
 from dancer.workstation_ui_v27_hotfix import _effective_output_snapshot
@@ -69,6 +70,38 @@ def test_candidate_score_transform_changes_score_not_stored_raw_plan():
     assert transformed.plan == baseline.plan
     assert transformed.quality.metrics["axis_diversity"] == pytest.approx(0.0)
     assert transformed.quality.overall != pytest.approx(baseline.quality.overall)
+
+
+def test_auto_improvement_scores_effective_output_but_returns_raw_plan():
+    raw = {
+        axis: [
+            (0.0, 15.0 + index * 4.0),
+            (4.0, 88.0 - index * 3.0),
+            (8.0, 25.0 + index * 5.0),
+        ]
+        for index, axis in enumerate(AXIS_ORDER)
+    }
+
+    def neutral_output(_plan, _generation_config):
+        return {
+            axis: [(0.0, 50.0), (8.0, 50.0)]
+            for axis in AXIS_ORDER
+        }
+
+    result = auto_improve(
+        _data(),
+        raw,
+        _config(),
+        config=ImprovementConfig(max_iterations=1, target_score=0.0, candidates=2),
+        score_transform=neutral_output,
+    )
+    raw_report = score_plan(raw, _data(), compute_windows=False)
+
+    # Optimization must keep the editable raw plan, while its reported quality
+    # describes the effective/shaped output that the user would actually use.
+    assert result.plan == raw
+    assert result.quality.metrics["axis_diversity"] == pytest.approx(0.0)
+    assert raw_report.metrics["axis_diversity"] > 0.0
 
 
 def test_effective_output_snapshot_respects_locked_base_and_mute():
