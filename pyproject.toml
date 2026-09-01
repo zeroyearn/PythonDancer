@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "python-dancer"
-version = "2.6.0"
-description = "Six-axis generation-quality workstation with independent musical timelines, Motion Intent, editing, safety, TCode and Intiface playback"
+version = "2.7.0"
+description = "Bilingual six-axis Quality Intelligence workstation with scored candidates, automatic improvement, SR6 mechanical projection, TCode and Intiface playback"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
