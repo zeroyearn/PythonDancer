@@ -153,9 +153,26 @@ class LiveSession:
         if self.worker is not None and self.worker.is_alive():
             return
         self.stop_event.clear()
-        self.source.start()
-        if self.sink is not None:
-            self.sink.open()
+        source_started = False
+        sink_opened = False
+        try:
+            self.source.start()
+            source_started = True
+            if self.sink is not None:
+                self.sink.open()
+                sink_opened = True
+        except Exception:
+            if sink_opened and self.sink is not None:
+                try:
+                    self.sink.stop()
+                except Exception:
+                    pass
+            if source_started:
+                try:
+                    self.source.stop()
+                except Exception:
+                    pass
+            raise
 
         def work():
             try:
@@ -190,6 +207,7 @@ class LiveSession:
 
         self.worker = Thread(target=work, daemon=True)
         self.worker.start()
+        return self
 
     def stop(self):
         self.stop_event.set()
