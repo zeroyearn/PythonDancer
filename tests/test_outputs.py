@@ -20,6 +20,18 @@ def test_intiface_frames_map_l0_motion_and_r0_rotation():
     assert all(0 <= frame[3] <= 1 for frame in frames)
 
 
+def test_intiface_frames_include_secondary_axis_keyframe_times():
+    plan = {
+        "L0": [(0.0, 50.0), (1.0, 50.0)],
+        "L1": [], "L2": [],
+        "R0": [(0.0, 50.0), (0.5, 100.0), (1.0, 50.0)],
+        "R1": [], "R2": [],
+    }
+    frames = intiface_frames(plan)
+    assert [frame[0] for frame in frames] == [0.0, 0.5, 1.0]
+    assert frames[1][4] == 1.0
+
+
 def test_intiface_soft_start_moves_to_start_pose_before_normal_outputs(monkeypatch):
     class OutputType:
         POSITION_WITH_DURATION = "position"
