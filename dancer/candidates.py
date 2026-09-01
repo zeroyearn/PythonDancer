@@ -6,8 +6,10 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from .independent_planner import IndependentAxisConfig
 from .kinematics import SR6Geometry
 from .multiaxis import MultiAxisConfig, plan_multiaxis
+from .optimizer import OptimizerConfig
 from .quality import QualityReport, QualityWeights, score_plan
 
 
@@ -25,6 +27,50 @@ class CandidateSpec:
     intent_amount: float = 0.0
 
 
+def candidate_config_to_dict(config: MultiAxisConfig) -> dict[str, object]:
+    return {
+        "preset": config.preset,
+        "strength": float(config.strength),
+        "gesture_strength": float(config.gesture_strength),
+        "independent": {
+            "enabled": bool(config.independent.enabled),
+            "min_interval": float(config.independent.min_interval),
+            "density": float(config.independent.density),
+            "accent_threshold": float(config.independent.accent_threshold),
+            "include_section_boundaries": bool(config.independent.include_section_boundaries),
+            "intent_override": dict(config.independent.intent_override),
+            "intent_override_amount": float(config.independent.intent_override_amount),
+        },
+        "optimizer": config.optimizer.to_dict(),
+    }
+
+
+def candidate_config_from_dict(base: MultiAxisConfig, payload: Mapping | None) -> MultiAxisConfig:
+    payload = dict(payload or {})
+    independent_data = dict(payload.get("independent") or {})
+    optimizer_data = dict(payload.get("optimizer") or {})
+    independent = base.independent
+    optimizer = base.optimizer
+    if independent_data:
+        independent = IndependentAxisConfig(**{
+            key: value for key, value in independent_data.items()
+            if key in IndependentAxisConfig.__dataclass_fields__
+        })
+    if optimizer_data:
+        optimizer = OptimizerConfig(**{
+            key: value for key, value in optimizer_data.items()
+            if key in OptimizerConfig.__dataclass_fields__
+        })
+    return replace(
+        base,
+        preset=str(payload.get("preset", base.preset)),
+        strength=float(payload.get("strength", base.strength)),
+        gesture_strength=float(payload.get("gesture_strength", base.gesture_strength)),
+        independent=independent,
+        optimizer=optimizer,
+    )
+
+
 @dataclass(frozen=True)
 class CandidateResult:
     name: str
@@ -40,6 +86,7 @@ class CandidateResult:
             "preset": self.config.preset,
             "strength": float(self.config.strength),
             "gesture_strength": float(self.config.gesture_strength),
+            "config": candidate_config_to_dict(self.config),
         }
         if include_plan:
             payload["plan"] = {axis: [[float(t), float(p)] for t, p in rows] for axis, rows in self.plan.items()}
