@@ -6,7 +6,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from .intent import INTENT_FIELDS, MotionIntent
+from .intent import MotionIntent
 
 
 def _smoothstep(value: float) -> float:
@@ -143,7 +143,7 @@ DEFAULT_LANES = {
     "stroke_depth": (0.0, 1.5, 1.0),
     "rotation_mix": (0.0, 1.5, 1.0),
     "gesture_density": (0.0, 2.0, 1.0),
-    "smoothing": (0.0, 1.0, .25),
+    "smoothing": (0.0, 1.0, 0.0),
     "complexity": (0.0, 1.0, .5),
     "safety_aggressiveness": (0.0, 1.0, .5),
 }
@@ -164,6 +164,10 @@ class AutomationSet:
             if name not in normalized:
                 normalized[name] = lane if isinstance(lane, AutomationLane) else AutomationLane.from_dict(lane)
         self.lanes = normalized
+
+    @property
+    def active(self) -> bool:
+        return any(lane.points for lane in self.lanes.values())
 
     def sample(self, time: float) -> dict[str, float]:
         return {name: lane.sample(time) for name, lane in self.lanes.items()}
@@ -224,6 +228,10 @@ class StyleMorphTimeline:
             [item if isinstance(item, StyleKeyframe) else StyleKeyframe.from_dict(item) for item in self.keyframes],
             key=lambda item: item.time,
         )
+
+    @property
+    def active(self) -> bool:
+        return bool(self.keyframes)
 
     def sample(self, time: float) -> tuple[MotionIntent, float, str]:
         if not self.keyframes:
