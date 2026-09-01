@@ -62,6 +62,7 @@ hiddenimports = sorted(set(
         "dancer.candidates",
         "dancer.comparison",
         "dancer.improvement",
+        "dancer.plan_window",
     ]
 ))
 
