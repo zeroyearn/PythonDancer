@@ -142,6 +142,13 @@ def generate_candidates(
     sections: Sequence[Mapping] | None = None,
     weights: QualityWeights | None = None,
 ) -> list[CandidateResult]:
+    """Generate and rank candidates without the expensive weak-range scan.
+
+    Candidate selection only consumes the overall/metric scores. Weak ranges are
+    computed for the current adopted plan and Auto Improvement separately, so
+    recursively scanning windows for every candidate multiplied work without
+    changing ranking.
+    """
     available = list(specs or default_candidate_specs())
     count = max(1, min(int(count), len(available)))
     results: list[CandidateResult] = []
@@ -155,6 +162,7 @@ def generate_candidates(
             geometry=geometry or config.geometry,
             mechanical_config=config.mechanical,
             weights=weights,
+            compute_windows=False,
         )
         results.append(CandidateResult(spec.name, config, plan, report))
     results.sort(key=lambda item: (-item.quality.overall, item.name))
