@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .calibration import DeviceCalibrationProfile, apply_calibration
-from .kinematics import SR6Geometry
+from .kinematics import AXES, SR6Geometry
 from .latency import DeviceTimingProfile, compensate_plan_latency
-from .mechanical_safety import MechanicalProjectionConfig, project_plan_to_safe, trajectory_mechanical_risk
+from .mechanical_safety import MechanicalProjectionConfig, project_plan_to_safe, project_pose_to_safe, trajectory_mechanical_risk
 from .optimizer import OptimizerConfig, optimize_multiaxis
 
 
@@ -40,6 +40,16 @@ class DeviceTwinProfile:
             max_acceleration={axis: item.max_acceleration for axis, item in self.calibration.axes.items()},
             max_jerk={axis: item.max_jerk for axis, item in self.calibration.axes.items()},
         )
+
+    def safe_pose(self, pose: Mapping[str, float], *, calibrate: bool = False):
+        canonical, risk, changed = project_pose_to_safe(pose, self.geometry, self.mechanical)
+        if calibrate:
+            mapped = {
+                axis: self.calibration.axes[axis].map_normalized(float(canonical.get(axis, 50.0)))
+                for axis in AXES
+            }
+            return mapped, risk, changed
+        return canonical, risk, changed
 
     def canonical_safe_plan(self, plan: Mapping[str, Sequence[tuple[float, float]]]):
         """Project a canonical 0..100 choreography into this device's safe workspace."""
