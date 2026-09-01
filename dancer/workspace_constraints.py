@@ -1,21 +1,29 @@
 """Physical safety pass for non-destructive workstation edits."""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Mapping, Sequence
 
+from .mechanical_safety import project_plan_to_safe
 from .motion import apply_constraints
 from .multiaxis import AXIS_ORDER, MultiAxisConfig, SECONDARY_LIMITS
+from .optimizer import optimize_multiaxis
 
 
 def constrain_workspace_plan(
     plan: Mapping[str, Sequence[tuple[float, float]]],
     config: MultiAxisConfig | None,
 ) -> dict[str, list[tuple[float, float]]]:
-    """Re-run per-axis speed/acceleration limits after manual edits.
+    """Re-run kinematic and mechanical safety after non-destructive edits.
 
-    Automatic plans are already constrained, but gesture overlays and local
-    splices are applied after planning. This pass makes the edited plan safe to
-    hand to funscript export or the live TCode controller.
+    Gesture overlays, curve interpolation, local splices, axis links, and gap
+    filling happen after the automatic planner. The final workstation pass must
+    therefore restore speed/acceleration/jerk constraints and, when enabled,
+    project the edited trajectory back into the configured SR6 safe set before
+    it can be exported or sent to a live device.
+
+    Empty axes remain empty throughout the optimizer/projection pipeline so a
+    muted channel is never reintroduced by safety processing.
     """
     result: dict[str, list[tuple[float, float]]] = {}
     if config is None:
@@ -40,4 +48,18 @@ def constrain_workspace_plan(
             max_acceleration=acceleration,
             min_interval=float(motion.min_interval),
         )
-    return result
+
+    optimizer = replace(config.optimizer, neutral=float(config.neutral))
+    constrained = optimize_multiaxis(result, optimizer)
+    if not config.mechanical.enabled:
+        return constrained
+
+    mechanical = replace(config.mechanical, neutral=float(config.neutral))
+    projected, _ = project_plan_to_safe(constrained, config.geometry, mechanical)
+
+    # Projection can insert cross-clock corrections. Re-run the multiaxis jerk
+    # limiter, then project once more exactly as the automatic planner does so
+    # smoothing cannot interpolate the trajectory back outside the safe set.
+    smoothed = optimize_multiaxis(projected, optimizer)
+    final, _ = project_plan_to_safe(smoothed, config.geometry, mechanical)
+    return final
