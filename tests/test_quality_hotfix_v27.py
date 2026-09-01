@@ -115,5 +115,6 @@ def test_weak_window_sections_are_clipped_and_rebased():
     ]
 
 
-def test_final_hotfix_module_imports():
+def test_final_release_layers_import():
     import dancer.workstation_ui_v27_hotfix  # noqa: F401
+    import dancer.workstation_ui_v27_async  # noqa: F401
