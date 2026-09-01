@@ -15,6 +15,19 @@ class MultiAxisWindow(_QualityWindow):
             self.i18n.refresh(force=True)
         self._refresh_quality_i18n()
 
+    def _timeline_edit_changed(self, committed=True):
+        super()._timeline_edit_changed(committed=committed)
+        if committed:
+            self._refresh_section_intent_combo()
+            self._sync_section_intent_ranges()
+            if self.quality_report is not None:
+                self.score_current()
+
+    def _apply_section_label(self):
+        super()._apply_section_label()
+        self._refresh_section_intent_combo()
+        self._sync_section_intent_ranges()
+
 
 def ux(args):
     app = MultiAxisWindow(args)
