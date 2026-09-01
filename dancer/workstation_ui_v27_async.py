@@ -7,6 +7,7 @@ the editable motion state changes before completion.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from threading import Thread
 from tkinter import messagebox
 
@@ -130,6 +131,27 @@ class MultiAxisWindow(_HotfixWindow):
         if revision == self._score_revision:
             self.quality_summary_var.set(f"Quality scoring failed: {exc}")
         self._launch_pending_score()
+
+    def apply_mechanical_policy(self):
+        """Commit the visible mechanical policy to the actual output plan now."""
+        try:
+            mechanical = self._mechanical_config()
+        except Exception as exc:
+            messagebox.showerror("PythonDancer", str(exc))
+            return
+        self._checkpoint()
+        if self.generated_config is not None:
+            self.generated_config = replace(
+                self.generated_config,
+                mechanical=mechanical,
+                geometry=self.sr6_geometry,
+            )
+        self._apply_workspace(redraw=True)
+        self._mark_changed()
+        self.score_current()
+        if self.quality_candidates:
+            self._refresh_candidate_scores(mark_changed=False)
+        self.status_var.set("Mechanical policy applied · current output reprojected and candidates rescored")
 
     # ---------- stale-result protection for mutating workers ----------
     def run_auto_improvement(self):
