@@ -40,6 +40,12 @@ def _song_data(beats=64):
     }
 
 
+def _sample_actions(actions, grid):
+    times = np.asarray([at for at, _ in actions], dtype=np.float64)
+    values = np.asarray([position for _, position in actions], dtype=np.float64)
+    return np.interp(grid, times, values, left=values[0], right=values[-1])
+
+
 def test_musical_phase_tracks_real_beat_bar_and_phrase_coordinates():
     beats = np.asarray([0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
     phase = musical_phase(beats, [0.5, 0.75, 1.0, 2.5], beats_per_bar=4, bars_per_phrase=2)
@@ -107,7 +113,13 @@ def test_multiaxis_defaults_to_choreography_but_reactive_mode_remains_available(
     assert set(choreo) == set(AXIS_ORDER)
     assert all(choreo[axis] for axis in AXIS_ORDER)
     assert all(reactive[axis] for axis in AXIS_ORDER)
+
+    # 2.6 choreography intentionally gives secondary axes independent musical
+    # clocks, while reactive mode keeps the shared L0 clock. Compare motion on
+    # a common preview grid instead of assuming equal keyframe counts.
+    duration = max(choreo["R0"][-1][0], reactive["R0"][-1][0])
+    grid = np.linspace(0.0, duration, 128)
     assert not np.allclose(
-        [position for _, position in choreo["R0"]],
-        [position for _, position in reactive["R0"]],
+        _sample_actions(choreo["R0"], grid),
+        _sample_actions(reactive["R0"], grid),
     )
