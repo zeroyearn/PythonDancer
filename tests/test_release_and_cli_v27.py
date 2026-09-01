@@ -1,5 +1,6 @@
 from argparse import Namespace
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -62,6 +63,26 @@ def test_improvement_config_rejects_non_finite_thresholds(kwargs):
         ImprovementConfig(**kwargs)
 
 
+def test_windows_desktop_entry_defaults_to_multiaxis(monkeypatch):
+    import ui_entry
+
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["PythonDancer.exe"])
+    monkeypatch.setattr(ui_entry, "main", lambda: calls.append(tuple(sys.argv)) or 0)
+    assert ui_entry.desktop_main() == 0
+    assert calls == [("PythonDancer.exe", "--multiaxis")]
+
+
+def test_windows_desktop_entry_preserves_explicit_arguments(monkeypatch):
+    import ui_entry
+
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["PythonDancer.exe", "--cli", "song.mp3"])
+    monkeypatch.setattr(ui_entry, "main", lambda: calls.append(tuple(sys.argv)) or 0)
+    assert ui_entry.desktop_main() == 0
+    assert calls == [("PythonDancer.exe", "--cli", "song.mp3")]
+
+
 def test_release_workflow_is_explicit_and_targets_27():
     text = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     assert 'default: "v2.7.0"' in text
@@ -69,3 +90,9 @@ def test_release_workflow_is_explicit_and_targets_27():
     assert 'branches:' not in text
     assert 'tags: ["v*"]' in text
     assert "PythonDancer 2.7.0 — Quality Intelligence" in text
+
+
+def test_windows_bundle_is_gui_only_and_freezes_plan_window():
+    text = Path("qt.spec").read_text(encoding="utf-8")
+    assert "console=False" in text
+    assert '"dancer.plan_window"' in text
