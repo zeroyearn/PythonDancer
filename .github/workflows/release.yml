@@ -2,14 +2,13 @@ name: Release PythonDancer
 
 on:
   push:
-    branches: ["master", "feat/generation-quality-2.6"]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag"
         required: false
-        default: "v2.6.0"
+        default: "v2.7.0"
 
 permissions:
   contents: write
@@ -31,7 +30,11 @@ jobs:
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then TAG="${GITHUB_REF_NAME}"
           elif [[ -n "${INPUT_TAG}" ]]; then TAG="${INPUT_TAG}"
-          else TAG="v2.6.0"; fi
+          else TAG="v2.7.0"; fi
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: ${TAG}" >&2
+            exit 2
+          fi
           VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
@@ -145,41 +148,39 @@ jobs:
         shell: bash
         run: |
           cat > RELEASE_NOTES.md <<'EOF'
-          ## PythonDancer 2.6.0 — Generation Quality / 生成质量
+          ## PythonDancer 2.7.0 — Quality Intelligence / 质量智能
 
-          PythonDancer 2.6 upgrades six-axis generation into a stem-aware, intent-driven multi-axis choreography workstation and adds a runtime Simplified Chinese / English desktop UI.
+          PythonDancer 2.7 adds a scored, self-improving choreography layer on top of the 2.6 stem-aware six-axis workstation.
 
-          ### Generation quality
-          - independent L1/L2/R0/R1/R2 musical event timelines driven by bass, hi-hat/high-band, vocal pitch motion, snare/drum onset and vocal/harmonic features;
-          - continuous Motion Intent: intensity, aggression, flow, complexity, symmetry, rotation bias, translation bias and accent density, including audio/manual blending;
-          - richer optional stem features for drums/kick/snare/hi-hat, bass, vocals and other;
-          - multi-reference style blending and deterministic style clustering;
-          - advanced Gesture Timeline blocks with per-axis mix, phase, cycles, direction and blend envelopes;
-          - cross-axis 6D pose / simultaneous-velocity optimization plus per-axis speed, acceleration and jerk constraints.
+          ### Quality Intelligence
+          - nine-part Motion Quality scoring: rhythm, phrase structure, smoothness, axis diversity, cross-axis coherence, repetition, mechanical safety, jerk comfort and stem responsiveness;
+          - weak-range detection with ranked multi-candidate generation;
+          - non-destructive A/B preview, candidate adoption and best-section merge;
+          - Auto Improvement only accepts replacements that improve the full-track score;
+          - section-level Motion Intent with exact override blending and local regeneration;
+          - candidate/project persistence now retains the selected generation character and optimizer settings.
 
-          ### Device adaptation & SR6 diagnostics
-          - reusable device calibration profiles with safe ranges, neutral, inversion, max speed, max acceleration and max jerk;
-          - calibration dynamic limits now feed the generation optimizer while canonical funscripts remain normalized 0..100;
-          - conservative one-axis-at-a-time calibration verification sequence;
-          - transport/device latency compensation and optional serial RTT measurement;
-          - firmware-model SR6 linkage diagnostics with current-pose reachability, six linkage angles, max servo angle, trajectory unreachable ratio and portable geometry profiles;
-          - SR6 solving remains diagnostic only: TCode firmware still owns actual servo/PWM calibration and control;
-          - calibrated live TCode and Intiface playback while exported scripts stay canonical;
-          - Soft Start, Auto Home, D2 mapping, DSTOP, Pause/Resume/Seek and exception-safe serial shutdown remain intact.
+          ### Mechanical safety
+          - SR6 reachability, servo margin, linkage sensitivity and singularity-risk scoring;
+          - nearest-safe-pose projection with configurable risk and servo limits;
+          - independent-axis projection persists required cross-clock safety keyframes so interpolation cannot immediately reconstruct a corrected unsafe union pose;
+          - generated motion is still reprocessed through the existing speed / acceleration / jerk optimizer;
+          - firmware remains responsible for final device-specific servo/PWM calibration and emergency safety.
 
-          ### 中文 / English workstation
-          - runtime menu switch between 简体中文 and English;
-          - localization covers inherited 2.4/2.5 workstation cards, menus, notebook tabs, Timeline Canvas text, status strings, MessageBox dialogs, Generation Quality, calibration and SR6 diagnostics;
-          - engine/control tokens such as `balanced`, `forward`, `L0` and protocol data are never translated, so language switching cannot change choreography behavior;
-          - CJK rendering uses installed system fonts; no third-party font files are bundled;
-          - `.pdance` schema 2 stores the selected UI language, advanced gestures and SR6 geometry profile reference while schema 1 remains readable.
+          ### Workstation / CLI
+          - new Quality Intelligence desktop tab with scoring, candidates, A/B, best-section merge, Auto Improvement, section Intent and mechanical controls;
+          - Simplified Chinese / English localization while engine tokens and TCode protocol values remain untranslated;
+          - CLI flags for scoring, candidates, section merging, auto-improvement, section Intent JSON and SR6 mechanical policy;
+          - `.pdance` schema 3 and motion manifest 1.5; schema 1/2 projects remain readable.
 
-          ### Desktop packages
-          - Windows x86_64 and native macOS arm64 / Intel x86_64 packages include all 2.6 release, i18n, calibration and kinematics modules;
-          - Demucs remains optional/external; existing separated stem folders can be selected directly.
+          ### Packages
+          - Windows x86_64;
+          - native macOS arm64;
+          - native macOS Intel x86_64;
+          - FFmpeg bundled in macOS packages; Demucs remains optional/external.
 
           ### macOS note
-          macOS bundles are ad-hoc signed but are not Apple-notarized. On first launch macOS may require Control-click/right-click → Open. FFmpeg is bundled.
+          macOS bundles are ad-hoc signed but are not Apple-notarized. On first launch macOS may require Control-click/right-click → Open.
           EOF
       - name: Publish GitHub Release
         shell: bash
