@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from dancer.candidates import generate_candidates
+from dancer.candidates import (
+    candidate_config_from_dict,
+    candidate_config_to_dict,
+    config_for_candidate,
+    default_candidate_specs,
+    generate_candidates,
+)
 from dancer.cli_v27 import add_cli_arguments
 from dancer.i18n import LANG_ZH, translate_text
 from dancer.i18n_v27 import install_v27_translations
@@ -74,7 +80,6 @@ def test_section_intent_amount_is_exact_inside_section():
     envelope = IntentEnvelope(beats, {field: tuple(.2 for _ in beats) for field in INTENT_FIELDS}, base)
     target = MotionIntent(**{field: (.9 if field == "intensity" else .2) for field in INTENT_FIELDS})
     result = apply_section_intent_overrides(envelope, [SectionIntentOverride(2.0, 7.0, target, .2, "verse", .25)])
-    # Interior alpha must be exactly 0.2: .2 * .8 + .9 * .2 = .34.
     assert result.fields["intensity"][4] == pytest.approx(.34)
 
 
@@ -125,8 +130,6 @@ def test_async_axis_projection_inserts_cross_clock_safety_keyframes():
     assert diagnostics["projected_samples"] > 0
     assert diagnostics["inserted_keyframes"] > 0
     assert diagnostics["unsafe_ratio"] == 0.0
-    # L0 had no 1s keyframe originally; if its safe projected value changed at
-    # that cross-axis event, the new implementation persists it explicitly.
     assert len(projected["L0"]) >= len(plan["L0"])
 
 
@@ -146,13 +149,47 @@ def test_candidate_generation_is_ranked_and_distinct():
     assert len({item.config.preset for item in results} | {round(item.config.independent.density, 3) for item in results}) >= 2
 
 
+def test_candidate_score_uses_active_mechanical_policy():
+    data = sample_data()
+    config = MultiAxisConfig(
+        motion=MotionConfig(subdivision=1),
+        mechanical=MechanicalProjectionConfig(enabled=True, max_risk=.35, servo_limit_deg=72.0),
+    )
+    candidate = generate_candidates(data, config, count=2)[0]
+    explicit = score_plan(
+        candidate.plan,
+        data,
+        geometry=candidate.config.geometry,
+        mechanical_config=candidate.config.mechanical,
+    )
+    assert candidate.quality.overall == pytest.approx(explicit.overall)
+    assert candidate.quality.metrics["mechanical_safety"] == pytest.approx(explicit.metrics["mechanical_safety"])
+
+
+def test_candidate_config_round_trip_preserves_generation_character():
+    base = simple_config()
+    candidate = config_for_candidate(base, default_candidate_specs()[2])
+    restored = candidate_config_from_dict(base, candidate_config_to_dict(candidate))
+    assert restored.preset == candidate.preset
+    assert restored.strength == pytest.approx(candidate.strength)
+    assert restored.gesture_strength == pytest.approx(candidate.gesture_strength)
+    assert restored.independent.density == pytest.approx(candidate.independent.density)
+    assert restored.independent.accent_threshold == pytest.approx(candidate.independent.accent_threshold)
+    assert restored.independent.intent_override_amount == pytest.approx(candidate.independent.intent_override_amount)
+    assert dict(restored.independent.intent_override) == dict(candidate.independent.intent_override)
+    assert restored.optimizer.pose_budget == pytest.approx(candidate.optimizer.pose_budget)
+    assert restored.optimizer.velocity_budget == pytest.approx(candidate.optimizer.velocity_budget)
+
+
 def test_auto_improvement_never_accepts_lower_score():
     data = sample_data()
     config = simple_config()
     plan = plan_multiaxis(data, config)
-    before = score_plan(plan, data).overall
+    before = score_plan(plan, data, mechanical_config=config.mechanical).overall
     result = auto_improve(data, plan, config, config=ImprovementConfig(max_iterations=1, candidates=2, minimum_improvement=0.0))
+    explicit = score_plan(result.plan, data, mechanical_config=config.mechanical)
     assert result.quality.overall + 1e-9 >= before
+    assert result.quality.overall == pytest.approx(explicit.overall)
     assert all(step.after + 1e-9 >= step.before for step in result.history)
 
 
