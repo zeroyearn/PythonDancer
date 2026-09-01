@@ -6,7 +6,7 @@ from threading import Event, Thread
 from time import monotonic
 from typing import Callable
 
-from .live import LiveChoreographyEngine, LiveFeatureFrame, StreamingAudioFeatures
+from .live import LiveChoreographyEngine, StreamingAudioFeatures
 from .tcode import SerialTCodeDevice, encode_axis
 
 
@@ -126,12 +126,7 @@ class TCodeLiveSink:
 
 
 class LiveSession:
-    """Background live audio -> features -> planner session.
-
-    ``on_motion`` is called from the session worker and should marshal into the
-    GUI thread if it touches Tk. ``sink`` is optional; without it Live mode is a
-    preview-only monitor.
-    """
+    """Background live audio -> features -> planner -> optional hardware sink."""
 
     def __init__(
         self,
@@ -140,12 +135,14 @@ class LiveSession:
         *,
         sink: TCodeLiveSink | None = None,
         on_motion: Callable | None = None,
+        pose_transform: Callable | None = None,
         bpm: float = 120.0,
     ):
         self.source = source
         self.engine = engine
         self.sink = sink
         self.on_motion = on_motion
+        self.pose_transform = pose_transform
         self.bpm = float(bpm)
         self.stop_event = Event()
         self.worker: Thread | None = None
@@ -177,10 +174,13 @@ class LiveSession:
                         confidence=.55,
                     )
                     motion = self.engine.process(frame)
+                    output_pose = dict(motion.pose)
+                    if self.pose_transform is not None:
+                        output_pose = dict(self.pose_transform(output_pose))
                     if self.sink is not None:
-                        self.sink.send_pose(motion.pose, interval_ms=max(20, int(motion.prediction_ms)))
+                        self.sink.send_pose(output_pose, interval_ms=max(20, int(motion.prediction_ms)))
                     if self.on_motion is not None:
-                        self.on_motion(frame, motion)
+                        self.on_motion(frame, motion, output_pose)
             finally:
                 try:
                     if self.sink is not None:
