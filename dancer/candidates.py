@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -141,13 +141,14 @@ def generate_candidates(
     geometry: SR6Geometry | None = None,
     sections: Sequence[Mapping] | None = None,
     weights: QualityWeights | None = None,
+    score_transform: Callable[[Mapping[str, Sequence[tuple[float, float]]], MultiAxisConfig], Mapping[str, Sequence[tuple[float, float]]]] | None = None,
 ) -> list[CandidateResult]:
-    """Generate and rank candidates without the expensive weak-range scan.
+    """Generate and rank candidates, optionally scoring their effective output.
 
-    Candidate selection only consumes the overall/metric scores. Weak ranges are
-    computed for the current adopted plan and Auto Improvement separately, so
-    recursively scanning windows for every candidate multiplied work without
-    changing ranking.
+    ``plan`` stored in CandidateResult remains the raw candidate base plan so it
+    can be adopted non-destructively. ``score_transform`` may apply workstation
+    gestures, curves, safety shaping and physical constraints to a snapshot for
+    ranking. Weak-range scans are intentionally skipped for candidate ranking.
     """
     available = list(specs or default_candidate_specs())
     count = max(1, min(int(count), len(available)))
@@ -155,8 +156,9 @@ def generate_candidates(
     for spec in available[:count]:
         config = config_for_candidate(base_config, spec)
         plan = plan_multiaxis(data, config)
+        scored_plan = score_transform(plan, config) if score_transform is not None else plan
         report = score_plan(
-            plan,
+            scored_plan,
             data,
             sections=sections,
             geometry=geometry or config.geometry,
