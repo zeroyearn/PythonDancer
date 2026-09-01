@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -42,7 +44,11 @@ class AxisCalibration:
         value = float(np.clip(position, 0.0, 100.0))
         if self.inverted:
             value = 100.0 - value
-        return float(self.minimum + (self.maximum - self.minimum) * value / 100.0)
+        if value <= 50.0:
+            alpha = value / 50.0
+            return float(self.minimum + (self.neutral - self.minimum) * alpha)
+        alpha = (value - 50.0) / 50.0
+        return float(self.neutral + (self.maximum - self.neutral) * alpha)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -87,16 +93,10 @@ class DeviceCalibrationProfile:
 
     @classmethod
     def from_d2(cls, device: DeviceProfile, *, name: str = "D2 device") -> "DeviceCalibrationProfile":
-        calibrations = {}
-        for axis in AXES:
-            raw = device.axes.get(axis) if device.axes else None
-            # D2 is TCode-space preference range. Keep PythonDancer normalized
-            # range at 0..100 while recording only supported axes in notes.
-            calibrations[axis] = AxisCalibration(
-                max_speed=DEFAULT_SPEED[axis],
-                max_acceleration=DEFAULT_ACCEL[axis],
-                max_jerk=DEFAULT_JERK[axis],
-            )
+        calibrations = {
+            axis: AxisCalibration(max_speed=DEFAULT_SPEED[axis], max_acceleration=DEFAULT_ACCEL[axis], max_jerk=DEFAULT_JERK[axis])
+            for axis in AXES
+        }
         supported = sorted(device.axes) if device.axes else list(AXES)
         return cls(name=name, axes=calibrations, notes="D2 supported axes: " + ", ".join(supported))
 
@@ -117,6 +117,20 @@ class DeviceCalibrationProfile:
             notes=str(payload.get("notes", "")),
             axes={axis: AxisCalibration.from_dict(value) for axis, value in dict(payload.get("axes", {})).items()},
         )
+
+
+def load_calibration_profile(path: str | Path) -> DeviceCalibrationProfile:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("calibration profile must contain a JSON object")
+    return DeviceCalibrationProfile.from_dict(payload)
+
+
+def save_calibration_profile(path: str | Path, profile: DeviceCalibrationProfile) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(profile.to_dict(), indent=2), encoding="utf-8")
+    return target
 
 
 def apply_calibration(plan: Mapping[str, Sequence[tuple[float, float]]], profile: DeviceCalibrationProfile | None):
