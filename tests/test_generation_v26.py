@@ -1,5 +1,3 @@
-import json
-
 import numpy as np
 
 from dancer.calibration import AxisCalibration, DeviceCalibrationProfile, apply_calibration, calibration_test_plan
@@ -37,7 +35,7 @@ def feature_data(count=24):
     }
 
 
-def test_motion_intent_is_bounded_and_sectioned():
+def test_motion_intent_is_bounded_and_sampleable():
     data = feature_data()
     envelope = infer_motion_intent(data)
     assert set(envelope.global_intent.to_dict()) == {
@@ -80,7 +78,6 @@ def test_profile_blending_and_clustering_are_deterministic():
     b = ChoreographyProfile(name="b", axis_scale={"R0": 1.8}, gesture_gain={"pulse": 1.6})
     blended = blend_profiles([a, b], [1., 3.], name="mix")
     assert blended.name == "mix"
-    assert blended.axis_multiplier("R0") == np.testing.assert_approx_equal(blended.axis_multiplier("R0"), 1.5) if False else blended.axis_multiplier("R0")
     assert abs(blended.axis_multiplier("R0") - 1.5) < 1e-9
     clusters = cluster_profiles([a, b], clusters=2)
     assert len(clusters) == 2
