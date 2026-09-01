@@ -1,7 +1,10 @@
 """Release entry layer for the PythonDancer 2.7 bilingual workstation."""
 from __future__ import annotations
 
+from tkinter import messagebox
+
 from .candidates import CandidateResult, candidate_config_from_dict
+from .comparison import best_section_merge
 from .i18n_v27 import install_v27_translations
 from .intent import INTENT_FIELDS
 from .multiaxis import AXIS_ORDER
@@ -56,6 +59,34 @@ class MultiAxisWindow(_QualityWindow):
         if candidate is not None:
             self._adopt_candidate_config(candidate.config)
         super().use_candidate(which)
+
+    def merge_best_sections(self):
+        if len(self.quality_candidates) < 2 or not self.workspace:
+            messagebox.showwarning("PythonDancer", "Generate at least two candidates first.")
+            return
+        try:
+            merged, choices, scores = best_section_merge(
+                self.quality_candidates,
+                self.workspace.sections,
+                self.data,
+                geometry=self.sr6_geometry,
+                locked_axes=self.workspace.locked_axes(),
+            )
+        except Exception as exc:
+            messagebox.showerror("PythonDancer", str(exc))
+            return
+        self._checkpoint()
+        self.base_plan = merged
+        self.preview_candidate_plan = None
+        self._apply_workspace(redraw=True)
+        self._mark_changed()
+        self.score_current()
+        summary = []
+        for index, section in enumerate(self.workspace.sections):
+            selected = choices.get(index, 0)
+            summary.append(f"{section.label}:{self.quality_candidates[selected].name}")
+        self.comparison_summary_var.set("Best sections · " + " | ".join(summary))
+        self.status_var.set("Merged highest-scoring candidate per section · locked axes preserved")
 
     def _load_project_document(self, project):
         super()._load_project_document(project)
