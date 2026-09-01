@@ -21,12 +21,22 @@ class SectionIntentOverride:
     def __post_init__(self):
         start = float(self.start)
         end = float(self.end)
-        if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+        amount = float(self.amount)
+        blend_seconds = float(self.blend_seconds)
+        if not np.isfinite(start) or not np.isfinite(end):
+            raise ValueError("section intent range must be finite")
+        start = max(0.0, start)
+        end = max(0.0, end)
+        if end <= start:
             raise ValueError("section intent end must be after start")
-        object.__setattr__(self, "start", max(0.0, start))
-        object.__setattr__(self, "end", max(0.0, end))
-        object.__setattr__(self, "amount", float(np.clip(self.amount, 0.0, 1.0)))
-        object.__setattr__(self, "blend_seconds", max(0.0, float(self.blend_seconds)))
+        if not np.isfinite(amount):
+            raise ValueError("section intent amount must be finite")
+        if not np.isfinite(blend_seconds) or blend_seconds < 0:
+            raise ValueError("section intent blend_seconds must be finite and non-negative")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
+        object.__setattr__(self, "amount", float(np.clip(amount, 0.0, 1.0)))
+        object.__setattr__(self, "blend_seconds", blend_seconds)
         if not isinstance(self.intent, MotionIntent):
             object.__setattr__(self, "intent", MotionIntent.from_dict(dict(self.intent)))
 
@@ -54,16 +64,16 @@ class SectionIntentOverride:
 
 def _edge_weight(beats: np.ndarray, block: SectionIntentOverride) -> np.ndarray:
     inside = (beats >= block.start) & (beats <= block.end)
-    weight = np.zeros(beats.size, dtype=np.float64)
-    weight[inside] = block.amount
+    envelope = np.zeros(beats.size, dtype=np.float64)
+    envelope[inside] = 1.0
     blend = min(block.blend_seconds, max(0.0, (block.end - block.start) * 0.5))
-    if blend <= 1e-9:
-        return weight
-    left = inside & (beats < block.start + blend)
-    right = inside & (beats > block.end - blend)
-    weight[left] *= np.clip((beats[left] - block.start) / blend, 0.0, 1.0)
-    weight[right] *= np.clip((block.end - beats[right]) / blend, 0.0, 1.0)
-    return weight * weight * (3.0 - 2.0 * weight)
+    if blend > 1e-9:
+        left = inside & (beats < block.start + blend)
+        right = inside & (beats > block.end - blend)
+        envelope[left] *= np.clip((beats[left] - block.start) / blend, 0.0, 1.0)
+        envelope[right] *= np.clip((block.end - beats[right]) / blend, 0.0, 1.0)
+        envelope = envelope * envelope * (3.0 - 2.0 * envelope)
+    return float(block.amount) * envelope
 
 
 def apply_section_intent_overrides(
