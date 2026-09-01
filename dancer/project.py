@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -110,7 +111,17 @@ class ProjectDocument:
         )
 
 
-def save_project(path: str | os.PathLike[str], project: ProjectDocument) -> Path:
+def _is_autosave_path(path: str | os.PathLike[str]) -> bool:
+    target = Path(path).expanduser()
+    try:
+        if target.resolve(strict=False).parent == AUTOSAVE_DIR.resolve(strict=False):
+            return True
+    except OSError:
+        pass
+    return target.name.lower().endswith(".autosave.pdance")
+
+
+def save_project(path: str | os.PathLike[str], project: ProjectDocument, *, remember: bool = True) -> Path:
     target = Path(path).expanduser()
     if target.suffix.lower() != ".pdance":
         target = target.with_suffix(".pdance")
@@ -127,7 +138,8 @@ def save_project(path: str | os.PathLike[str], project: ProjectDocument) -> Path
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
-    remember_project(target)
+    if remember and not _is_autosave_path(target):
+        remember_project(target)
     return target
 
 
@@ -135,24 +147,34 @@ def load_project(path: str | os.PathLike[str]) -> ProjectDocument:
     target = Path(path).expanduser()
     data = json.loads(target.read_text(encoding="utf-8"))
     project = ProjectDocument.from_dict(data)
-    remember_project(target)
+    if not _is_autosave_path(target):
+        remember_project(target)
     return project
 
 
 def autosave_path(media_path: str | os.PathLike[str]) -> Path:
     AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
-    name = Path(media_path).stem if media_path else "untitled"
-    safe = "".join(char if char.isalnum() or char in "-_" else "_" for char in name)[:80] or "untitled"
-    return AUTOSAVE_DIR / f"{safe}.autosave.pdance"
+    if media_path:
+        source = Path(media_path).expanduser()
+        name = source.stem
+        canonical = str(source.resolve(strict=False))
+        digest = hashlib.sha256(canonical.encode("utf-8", errors="surrogatepass")).hexdigest()[:10]
+    else:
+        name = "untitled"
+        digest = "session"
+    safe = "".join(char if char.isalnum() or char in "-_" else "_" for char in name)[:68] or "untitled"
+    return AUTOSAVE_DIR / f"{safe}-{digest}.autosave.pdance"
 
 
 def autosave_project(project: ProjectDocument) -> Path:
-    return save_project(autosave_path(project.media_path), project)
+    return save_project(autosave_path(project.media_path), project, remember=False)
 
 
 def remember_project(path: str | os.PathLike[str], *, limit: int = 12) -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     resolved = str(Path(path).expanduser().resolve())
+    if _is_autosave_path(resolved):
+        return
     recent = recent_projects()
     recent = [item for item in recent if item != resolved]
     recent.insert(0, resolved)
@@ -164,7 +186,11 @@ def recent_projects() -> list[str]:
         values = json.loads(RECENT_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return []
-    return [str(item) for item in values if isinstance(item, str) and Path(item).exists()]
+    return [
+        str(item)
+        for item in values
+        if isinstance(item, str) and Path(item).exists() and not _is_autosave_path(item)
+    ]
 
 
 class UndoStack:
