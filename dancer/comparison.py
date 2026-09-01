@@ -106,6 +106,7 @@ def merge_candidate_sections(
     *,
     base_candidate: int = 0,
     blend: float = 0.25,
+    locked_axes: Sequence[str] = (),
 ):
     if not candidates:
         raise ValueError("at least one candidate is required")
@@ -119,7 +120,14 @@ def merge_candidate_sections(
         if end <= start:
             continue
         replacement = slice_plan(candidates[selected].plan, start, end, rebase=False)
-        merged = splice_plan(merged, replacement, start, end, blend=blend)
+        merged = splice_plan(
+            merged,
+            replacement,
+            start,
+            end,
+            locked_axes=locked_axes,
+            blend=blend,
+        )
     return merged
 
 
@@ -131,6 +139,7 @@ def best_section_merge(
     geometry: SR6Geometry | None = None,
     mechanical_config: MechanicalProjectionConfig | None = None,
     blend: float = 0.25,
+    locked_axes: Sequence[str] = (),
 ):
     if not candidates:
         raise ValueError("at least one candidate is required")
@@ -157,5 +166,12 @@ def best_section_merge(
             ).overall))
         choices[index] = int(np.argmax(scores))
         section_scores[index] = scores
-    merged = merge_candidate_sections(candidates, sections, choices, base_candidate=0, blend=blend)
+    merged = merge_candidate_sections(
+        candidates,
+        sections,
+        choices,
+        base_candidate=0,
+        blend=blend,
+        locked_axes=locked_axes,
+    )
     return merged, choices, section_scores
