@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Mapping, Sequence
 
 from .candidates import CandidateResult, generate_candidates
@@ -23,12 +24,15 @@ class ImprovementConfig:
     def __post_init__(self):
         if self.max_iterations < 1 or self.candidates < 1:
             raise ValueError("improvement iteration/candidate counts must be positive")
-        if not 0.0 <= float(self.target_score) <= 100.0:
-            raise ValueError("target_score must be within 0..100")
-        if float(self.minimum_improvement) < 0.0:
-            raise ValueError("minimum_improvement must be non-negative")
-        if float(self.blend_seconds) < 0.0:
-            raise ValueError("blend_seconds must be non-negative")
+        target = float(self.target_score)
+        minimum = float(self.minimum_improvement)
+        blend = float(self.blend_seconds)
+        if not isfinite(target) or not 0.0 <= target <= 100.0:
+            raise ValueError("target_score must be finite and within 0..100")
+        if not isfinite(minimum) or minimum < 0.0:
+            raise ValueError("minimum_improvement must be finite and non-negative")
+        if not isfinite(blend) or blend < 0.0:
+            raise ValueError("blend_seconds must be finite and non-negative")
 
 
 @dataclass(frozen=True)
