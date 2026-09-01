@@ -116,7 +116,10 @@ def merge_candidate_sections(
         if not 0 <= selected < len(candidates):
             continue
         start, end = _range(section)
-        merged = splice_plan(merged, candidates[selected].plan, start, end, blend=blend)
+        if end <= start:
+            continue
+        replacement = slice_plan(candidates[selected].plan, start, end, rebase=False)
+        merged = splice_plan(merged, replacement, start, end, blend=blend)
     return merged
 
 
