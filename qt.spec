@@ -23,6 +23,8 @@ hiddenimports = sorted(set(
 		"dancer.workstation_ui_v26",
 		"dancer.workstation_ui_v26_final",
 		"dancer.workstation_ui_v26_release",
+		"dancer.workstation_ui_v27",
+		"dancer.workstation_ui_v27_release",
 		"dancer.editing",
 		"dancer.safety",
 		"dancer.project",
@@ -39,9 +41,17 @@ hiddenimports = sorted(set(
 		"dancer.geometry_profile",
 		"dancer.i18n",
 		"dancer.i18n_safe",
+		"dancer.i18n_v27",
+		"dancer.section_intent",
+		"dancer.mechanical_safety",
+		"dancer.quality",
+		"dancer.candidates",
+		"dancer.comparison",
+		"dancer.improvement",
 		"dancer.cli_v26",
 		"dancer.cli_v26_final",
 		"dancer.cli_v26_release",
+		"dancer.cli_v27",
 	]
 ))
 
