@@ -99,19 +99,24 @@ def _slice_data(data: Mapping | None, start: float, end: float) -> dict:
     return result
 
 
+def _copy_plan(plan):
+    return {axis: list(plan.get(axis, ())) for axis in AXES}
+
+
 def merge_candidate_sections(
     candidates: Sequence[CandidateResult],
     sections: Sequence,
     assignments: Mapping[int, int],
     *,
     base_candidate: int = 0,
+    base_plan=None,
     blend: float = 0.25,
     locked_axes: Sequence[str] = (),
 ):
     if not candidates:
         raise ValueError("at least one candidate is required")
     base_index = int(np.clip(base_candidate, 0, len(candidates) - 1))
-    merged = {axis: list(candidates[base_index].plan.get(axis, ())) for axis in AXES}
+    merged = _copy_plan(base_plan if base_plan is not None else candidates[base_index].plan)
     for index, section in enumerate(sections):
         selected = int(assignments.get(index, base_index))
         if not 0 <= selected < len(candidates):
@@ -138,11 +143,14 @@ def best_section_merge(
     *,
     geometry: SR6Geometry | None = None,
     mechanical_config: MechanicalProjectionConfig | None = None,
+    base_plan=None,
     blend: float = 0.25,
     locked_axes: Sequence[str] = (),
 ):
     if not candidates:
         raise ValueError("at least one candidate is required")
+    locked = tuple(axis for axis in locked_axes if axis in AXES)
+    score_base = base_plan if base_plan is not None else candidates[0].plan
     choices: dict[int, int] = {}
     section_scores: dict[int, list[float]] = {}
     for index, section in enumerate(sections):
@@ -152,9 +160,13 @@ def best_section_merge(
             choices[index] = 0
             continue
         local_data = _slice_data(data, start, end)
+        locked_local = slice_plan(score_base, start, end, rebase=True) if locked else None
         scores = []
         for candidate in candidates:
             local = slice_plan(candidate.plan, start, end, rebase=True)
+            if locked_local is not None:
+                for axis in locked:
+                    local[axis] = list(locked_local[axis])
             effective_geometry = geometry or candidate.config.geometry
             effective_mechanical = mechanical_config or candidate.config.mechanical
             scores.append(float(score_plan(
@@ -171,7 +183,8 @@ def best_section_merge(
         sections,
         choices,
         base_candidate=0,
+        base_plan=base_plan,
         blend=blend,
-        locked_axes=locked_axes,
+        locked_axes=locked,
     )
     return merged, choices, section_scores
