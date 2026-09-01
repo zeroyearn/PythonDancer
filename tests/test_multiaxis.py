@@ -25,6 +25,12 @@ def sample_data():
     }
 
 
+def _sample(actions, grid):
+    times = np.asarray([at for at, _ in actions], dtype=float)
+    values = np.asarray([pos for _, pos in actions], dtype=float)
+    return np.interp(grid, times, values, left=values[0], right=values[-1])
+
+
 def test_plan_multiaxis_has_six_distinct_bounded_axes():
     plan = plan_multiaxis(
         sample_data(),
@@ -41,9 +47,13 @@ def test_plan_multiaxis_has_six_distinct_bounded_axes():
         assert times == sorted(times)
         assert np.all(np.isfinite(positions))
         assert np.all((positions >= 0.0) & (positions <= 100.0))
-    l1 = np.asarray([pos for _, pos in plan["L1"]])
-    l2 = np.asarray([pos for _, pos in plan["L2"]])
-    r0 = np.asarray([pos for _, pos in plan["R0"]])
+    # 2.6 secondary axes may have different keyframe clocks, so compare them on
+    # a common preview grid rather than requiring equal-length arrays.
+    duration = max(plan[axis][-1][0] for axis in AXIS_ORDER if plan[axis])
+    grid = np.linspace(0.0, duration, 64)
+    l1 = _sample(plan["L1"], grid)
+    l2 = _sample(plan["L2"], grid)
+    r0 = _sample(plan["R0"], grid)
     assert not np.allclose(l1, l2)
     assert not np.allclose(l1, r0)
 
@@ -76,5 +86,5 @@ def test_standard_bundle_paths_and_export(tmp_path):
 
     manifest = json.loads(written["manifest"].read_text(encoding="utf8"))
     assert set(manifest["axes"]) == set(AXIS_ORDER)
-    assert manifest["version"] == "1.3"
+    assert manifest["version"] == "1.4"
     assert manifest["metadata"]["choreography_sections"] == "intro:0-8"
