@@ -77,10 +77,18 @@ def discover_intiface_devices_sync(address: str = DEFAULT_INTIFACE_ADDRESS, scan
 
 
 def _timeline(plan: Mapping[str, Sequence[tuple[float, float]]]):
-    preferred = plan.get("L0") or ()
-    if preferred:
-        return [float(at) for at, _ in preferred]
-    return sorted({float(at) for actions in plan.values() for at, _ in actions})
+    """Return the union clock for independent six-axis motion.
+
+    PythonDancer 2.6+ allows L1/L2/R0/R1/R2 to carry keyframes between L0
+    actions. Intiface must therefore schedule every axis event rather than using
+    L0 as the sole clock, otherwise secondary-axis accents are silently missed.
+    """
+    return sorted({
+        float(at)
+        for actions in plan.values()
+        for at, _ in actions
+        if np.isfinite(at)
+    })
 
 
 def intiface_frames(plan: Mapping[str, Sequence[tuple[float, float]]]):
