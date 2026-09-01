@@ -15,11 +15,14 @@ hiddenimports = sorted(set(
     + collect_submodules("buttplug")
     + [
         "matplotlib.backends.backend_tkagg",
+        "mpl_toolkits.mplot3d",
         "serial",
         "serial.tools.list_ports",
         "serial.tools.list_ports_osx",
         "dancer.cli",
         "dancer.cli_v26",
+        "dancer.cli_v26_final",
+        "dancer.cli_v26_release",
         "dancer.ui",
         "dancer.multiaxis_ui",
         "dancer.choreography",
@@ -32,6 +35,8 @@ hiddenimports = sorted(set(
         "dancer.workstation_ui_v25",
         "dancer.workstation_ui_v25_final",
         "dancer.workstation_ui_v26",
+        "dancer.workstation_ui_v26_final",
+        "dancer.workstation_ui_v26_release",
         "dancer.editing",
         "dancer.safety",
         "dancer.project",
@@ -42,6 +47,11 @@ hiddenimports = sorted(set(
         "dancer.reference_library",
         "dancer.latency",
         "dancer.calibration",
+        "dancer.generation_limits",
+        "dancer.kinematics",
+        "dancer.geometry_profile",
+        "dancer.i18n",
+        "dancer.i18n_safe",
     ]
 ))
 
