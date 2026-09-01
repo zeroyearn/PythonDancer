@@ -70,6 +70,7 @@ class MultiAxisWindow(_QualityWindow):
                 self.workspace.sections,
                 self.data,
                 geometry=self.sr6_geometry,
+                base_plan=self.base_plan,
                 locked_axes=self.workspace.locked_axes(),
             )
         except Exception as exc:
