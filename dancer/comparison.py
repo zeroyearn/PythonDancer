@@ -8,6 +8,7 @@ import numpy as np
 
 from .candidates import CandidateResult
 from .kinematics import AXES, SR6Geometry
+from .mechanical_safety import MechanicalProjectionConfig
 from .quality import QualityReport, score_plan
 from .workspace import splice_plan
 
@@ -40,10 +41,13 @@ def _axis_rms(a, b, axis: str) -> float:
     if not grid:
         return 0.0
     x = np.asarray(grid, dtype=np.float64)
+
     def sample(rows):
-        if not rows: return np.full(x.size, 50.0)
+        if not rows:
+            return np.full(x.size, 50.0)
         t = np.asarray([v[0] for v in rows]); p = np.asarray([v[1] for v in rows])
         return np.interp(x, t, p, left=p[0], right=p[-1])
+
     return float(np.sqrt(np.mean((sample(rows_a) - sample(rows_b)) ** 2)))
 
 
@@ -55,9 +59,10 @@ def compare_plans(
     report_a: QualityReport | None = None,
     report_b: QualityReport | None = None,
     geometry: SR6Geometry | None = None,
+    mechanical_config: MechanicalProjectionConfig | None = None,
 ) -> ComparisonReport:
-    report_a = report_a or score_plan(plan_a, data, geometry=geometry)
-    report_b = report_b or score_plan(plan_b, data, geometry=geometry)
+    report_a = report_a or score_plan(plan_a, data, geometry=geometry, mechanical_config=mechanical_config)
+    report_b = report_b or score_plan(plan_b, data, geometry=geometry, mechanical_config=mechanical_config)
     metrics = sorted(set(report_a.metrics) | set(report_b.metrics))
     return ComparisonReport(
         float(report_a.overall),
@@ -89,9 +94,12 @@ def _slice_data(data: Mapping | None, start: float, end: float) -> dict:
     indices = np.where(mask)[0]
     result = {"beats": beats[mask] - start}
     for key, raw in data.items():
-        if key == "beats": continue
-        try: arr = np.asarray(raw).reshape(-1)
-        except Exception: continue
+        if key == "beats":
+            continue
+        try:
+            arr = np.asarray(raw).reshape(-1)
+        except Exception:
+            continue
         if arr.size >= beats.size and indices.size:
             result[key] = arr[indices]
     return result
@@ -124,6 +132,7 @@ def best_section_merge(
     data: Mapping | None = None,
     *,
     geometry: SR6Geometry | None = None,
+    mechanical_config: MechanicalProjectionConfig | None = None,
     blend: float = 0.25,
 ):
     if not candidates:
@@ -136,7 +145,15 @@ def best_section_merge(
         scores = []
         for candidate in candidates:
             local = _slice_plan(candidate.plan, start, end)
-            scores.append(float(score_plan(local, local_data, geometry=geometry, compute_windows=False).overall))
+            effective_geometry = geometry or candidate.config.geometry
+            effective_mechanical = mechanical_config or candidate.config.mechanical
+            scores.append(float(score_plan(
+                local,
+                local_data,
+                geometry=effective_geometry,
+                mechanical_config=effective_mechanical,
+                compute_windows=False,
+            ).overall))
         choices[index] = int(np.argmax(scores))
         section_scores[index] = scores
     merged = merge_candidate_sections(candidates, sections, choices, base_candidate=0, blend=blend)
