@@ -82,15 +82,42 @@ def _print_quality(report):
             print(f"    {item.start:7.2f}-{item.end:7.2f}s  {item.score:5.1f}  {item.weakest_metric}")
 
 
+def _finite(value) -> bool:
+    try:
+        return bool(np.isfinite(float(value)))
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_args(args) -> str | None:
+    candidates = getattr(args, "quality_candidates", 1)
+    if not 1 <= int(candidates) <= 8:
+        return "--quality_candidates must be between 1 and 8."
+    risk = getattr(args, "mechanical_max_risk", .82)
+    if not _finite(risk) or not 0.0 <= float(risk) <= 1.0:
+        return "--mechanical_max_risk must be a finite value within 0..1."
+    iterations = getattr(args, "improve_iterations", 4)
+    if int(iterations) < 1:
+        return "--improve_iterations must be at least 1."
+    target = getattr(args, "improve_target", 90.0)
+    if not _finite(target) or not 0.0 <= float(target) <= 100.0:
+        return "--improve_target must be a finite value within 0..100."
+    minimum_gain = getattr(args, "improve_min_gain", .35)
+    if not _finite(minimum_gain) or float(minimum_gain) < 0.0:
+        return "--improve_min_gain must be a finite non-negative value."
+    servo_limit = getattr(args, "servo_limit_deg", 88.0)
+    if not _finite(servo_limit) or float(servo_limit) <= 0.0:
+        return "--servo_limit_deg must be a finite positive value."
+    sensitivity = getattr(args, "singularity_sensitivity", 2.5)
+    if not _finite(sensitivity) or float(sensitivity) <= 0.0:
+        return "--singularity_sensitivity must be a finite positive value."
+    return None
+
+
 def cmd(args):
-    if not 1 <= int(getattr(args, "quality_candidates", 1)) <= 8:
-        print("--quality_candidates must be between 1 and 8.")
-        return 2
-    if not 0.0 <= float(getattr(args, "mechanical_max_risk", .82)) <= 1.0:
-        print("--mechanical_max_risk must be within 0..1.")
-        return 2
-    if int(getattr(args, "improve_iterations", 4)) < 1:
-        print("--improve_iterations must be at least 1.")
+    invalid = _validate_args(args)
+    if invalid:
+        print(invalid)
         return 2
 
     original_multi = cli_v26._multi_config
@@ -117,6 +144,7 @@ def cmd(args):
         analysis = analyze_multiaxis(data, config)
         sections = _section_ranges(data, analysis, duration)
         final = base
+        active_config = config
         candidate_results = []
         count = int(getattr(args, "quality_candidates", 1))
         if count > 1 or getattr(args, "merge_best_sections", False) or getattr(args, "auto_improve", False):
@@ -126,8 +154,18 @@ def cmd(args):
                 print(f"  {rank}. {candidate.name:18s} {candidate.quality.overall:5.1f}")
             if not getattr(args, "keep_base_candidate", False):
                 final = {axis: list(rows) for axis, rows in candidate_results[0].plan.items()}
+                active_config = candidate_results[0].config
         if getattr(args, "merge_best_sections", False) and candidate_results and sections:
-            final, choices, section_scores = best_section_merge(candidate_results, sections, data, geometry=config.geometry)
+            final, choices, section_scores = best_section_merge(
+                candidate_results,
+                sections,
+                data,
+                geometry=config.geometry,
+                mechanical_config=config.mechanical,
+            )
+            # A per-section merge has no single candidate character; retain the
+            # requested base config for any subsequent local improvement pass.
+            active_config = config
             print("Best-section merge:")
             for index, section in enumerate(sections):
                 selected = choices.get(index, 0)
@@ -137,14 +175,14 @@ def cmd(args):
             result = auto_improve(
                 data,
                 final,
-                config,
+                active_config,
                 config=ImprovementConfig(
                     max_iterations=int(args.improve_iterations),
                     target_score=float(args.improve_target),
                     minimum_improvement=float(args.improve_min_gain),
                     candidates=max(2, count),
                 ),
-                geometry=config.geometry,
+                geometry=active_config.geometry,
                 sections=sections,
             )
             final = {axis: list(rows) for axis, rows in result.plan.items()}
