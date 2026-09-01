@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from .candidates import CandidateResult, generate_candidates
 from .kinematics import SR6Geometry
@@ -72,24 +72,47 @@ def auto_improve(
     geometry: SR6Geometry | None = None,
     sections: Sequence[Mapping] | None = None,
     locked_axes: Sequence[str] = (),
+    score_transform: Callable[[Mapping[str, Sequence[tuple[float, float]]], MultiAxisConfig], Mapping[str, Sequence[tuple[float, float]]]] | None = None,
 ) -> ImprovementResult:
+    """Improve raw editable motion while optionally scoring its effective output.
+
+    The returned ``plan`` always remains a raw/base plan suitable for the
+    workstation's non-destructive edit chain. ``score_transform`` can project a
+    trial through Gesture/Curve/Safety/Mechanical shaping before quality is
+    evaluated, keeping GUI optimization aligned with what is actually exported
+    or sent to hardware. CLI behavior is unchanged when no transform is passed.
+    """
     config = config or ImprovementConfig()
     geometry = geometry or generation_config.geometry
     mechanical = generation_config.mechanical
     current = {axis: list(rows) for axis, rows in base_plan.items()}
-    report = score_plan(current, data, sections=sections, geometry=geometry, mechanical_config=mechanical)
+
+    def evaluate(plan, *, compute_windows: bool = True) -> QualityReport:
+        scored = score_transform(plan, generation_config) if score_transform is not None else plan
+        return score_plan(
+            scored,
+            data,
+            sections=sections,
+            geometry=geometry,
+            mechanical_config=mechanical,
+            compute_windows=compute_windows,
+        )
+
+    report = evaluate(current)
     history: list[ImprovementStep] = []
     if report.overall >= config.target_score:
         return ImprovementResult(current, report, (), "target score already met")
 
     # Candidate generation is deterministic for a fixed analysis/config, so the
-    # same candidate bank can be reused while the accepted workspace evolves.
+    # same raw candidate bank can be reused while the accepted workspace evolves.
+    # Candidate quality metadata is not consumed by this loop; every splice is
+    # evaluated through ``evaluate`` against the current effective output.
     bank: list[CandidateResult] = generate_candidates(
         data, generation_config, count=config.candidates, geometry=geometry, sections=sections
     )
     reason = "iteration limit"
     for iteration in range(1, config.max_iterations + 1):
-        report = score_plan(current, data, sections=sections, geometry=geometry, mechanical_config=mechanical)
+        report = evaluate(current)
         if report.overall >= config.target_score:
             reason = "target score met"; break
         if not report.weak_ranges:
@@ -108,14 +131,7 @@ def auto_improve(
                 locked_axes=locked_axes,
                 blend=config.blend_seconds,
             )
-            trial = score_plan(
-                merged,
-                data,
-                sections=sections,
-                geometry=geometry,
-                mechanical_config=mechanical,
-                compute_windows=False,
-            )
+            trial = evaluate(merged, compute_windows=False)
             if trial.overall > best_score:
                 best_score = trial.overall
                 best_plan = merged
@@ -124,5 +140,5 @@ def auto_improve(
             reason = "improvement below threshold"; break
         history.append(ImprovementStep(iteration, weak.start, weak.end, best_name, report.overall, best_score))
         current = best_plan
-    final = score_plan(current, data, sections=sections, geometry=geometry, mechanical_config=mechanical)
+    final = evaluate(current)
     return ImprovementResult(current, final, tuple(history), reason)
