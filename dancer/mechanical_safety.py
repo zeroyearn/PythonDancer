@@ -22,9 +22,22 @@ class MechanicalProjectionConfig:
     neutral: float = 50.0
 
     def __post_init__(self):
+        numeric = {
+            "max_risk": self.max_risk,
+            "servo_limit_deg": self.servo_limit_deg,
+            "soft_margin_deg": self.soft_margin_deg,
+            "sensitivity_limit_deg_per_unit": self.sensitivity_limit_deg_per_unit,
+            "finite_difference_step": self.finite_difference_step,
+            "neutral": self.neutral,
+        }
+        if any(not np.isfinite(float(value)) for value in numeric.values()):
+            raise ValueError("mechanical safety limits must be finite")
         object.__setattr__(self, "max_risk", float(np.clip(self.max_risk, 0.0, 1.0)))
+        object.__setattr__(self, "neutral", float(np.clip(self.neutral, 0.0, 100.0)))
         if self.servo_limit_deg <= 0 or self.soft_margin_deg <= 0 or self.sensitivity_limit_deg_per_unit <= 0:
             raise ValueError("mechanical safety limits must be positive")
+        if self.finite_difference_step <= 0:
+            raise ValueError("finite_difference_step must be positive")
         if self.binary_iterations < 1 or self.coordinate_iterations < 0:
             raise ValueError("mechanical projection iterations are invalid")
 
@@ -54,7 +67,8 @@ class MechanicalRisk:
 
     @property
     def safe(self) -> bool:
-        return self.reachable and self.risk < 1.0
+        """Basic feasibility only; policy thresholds are evaluated by _is_safe."""
+        return self.reachable and self.risk < 1.0 and self.servo_margin_deg >= 0.0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -125,7 +139,7 @@ def project_pose_to_safe(
     if not config.enabled or (initial.reachable and initial.risk <= config.max_risk and initial.servo_margin_deg >= 0.0):
         return desired, initial, False
 
-    neutral = {axis: float(np.clip(config.neutral, 0.0, 100.0)) for axis in AXES}
+    neutral = {axis: float(config.neutral) for axis in AXES}
     if not _is_safe(neutral, geometry, config):
         return neutral, mechanical_risk_at_pose(neutral, geometry, config), True
 
@@ -172,26 +186,39 @@ def project_plan_to_safe(
     times = _grid(copied)
     if not times:
         return copied, trajectory_mechanical_risk(copied, geometry, config)
+
     projected: dict[float, dict[str, float]] = {}
-    changed = 0
+    requested: dict[float, dict[str, float]] = {}
+    changed_times: list[float] = []
     for at in times:
         pose = sample_plan_pose(copied, at)
         safe_pose, _, did_change = project_pose_to_safe(pose, geometry, config)
+        requested[at] = pose
         projected[at] = safe_pose
-        changed += int(did_change)
+        if did_change:
+            changed_times.append(at)
+
+    # Each axis keeps its independent musical clock. However, when projection
+    # changes an axis at another axis's timestamp, that safe value must become a
+    # real keyframe. Otherwise reconstructing the independent curves can
+    # interpolate straight back through the unsafe pose we just corrected.
     result: dict[str, list[tuple[float, float]]] = {}
-    grid = np.asarray(times, dtype=np.float64)
     for axis in AXES:
         original = copied[axis]
         if not original:
             result[axis] = []
             continue
-        values = np.asarray([projected[at][axis] for at in times], dtype=np.float64)
-        original_times = np.asarray([row[0] for row in original], dtype=np.float64)
-        sampled = np.interp(original_times, grid, values)
-        result[axis] = [(float(at), float(np.clip(pos, 0.0, 100.0))) for at, pos in zip(original_times, sampled)]
+        rows = {float(at): float(np.clip(pos, 0.0, 100.0)) for at, pos in original}
+        for at in changed_times:
+            safe_value = float(projected[at][axis])
+            requested_value = float(requested[at][axis])
+            if abs(safe_value - requested_value) > 1e-6:
+                rows[float(at)] = float(np.clip(safe_value, 0.0, 100.0))
+        result[axis] = sorted(rows.items())
+
     diagnostics = trajectory_mechanical_risk(result, geometry, config)
-    diagnostics["projected_samples"] = int(changed)
+    diagnostics["projected_samples"] = len(changed_times)
+    diagnostics["inserted_keyframes"] = int(sum(max(0, len(result[axis]) - len(copied[axis])) for axis in AXES))
     return result, diagnostics
 
 
