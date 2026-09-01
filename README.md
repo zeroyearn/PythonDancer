@@ -1,52 +1,194 @@
-# PythonDancer 2.6
+# PythonDancer 2.7
 
-PythonDancer turns audio/video soundtracks into editable six-axis choreography for `L0/L1/L2/R0/R1/R2`, exports MultiFunPlayer-compatible funscript bundles/TCode, and can stream live motion through serial TCode or Intiface Central / Buttplug.
+PythonDancer turns audio/video soundtracks into editable six-axis choreography for `L0/L1/L2/R0/R1/R2`, exports MultiFunPlayer-compatible Funscript bundles/TCode, and streams live motion through serial TCode or Intiface Central / Buttplug.
 
-2.6 is the **Generation Quality** release: the secondary axes no longer need to share L0's keyframe clock. Optional stems, continuous Motion Intent, learned reference style, advanced gesture blocks and a 6D optimizer work together before the existing editing/safety/device layers.
+**2.7 — Quality Intelligence** adds scored multi-candidate generation, A/B preview, automatic weak-range improvement, per-section Motion Intent and SR6 mechanical-risk projection on top of the 2.6 generation-quality engine and the 2.5 editing/safety workstation.
+
+The desktop workstation supports runtime **简体中文 / English** switching. Internal motion/protocol tokens are never translated.
 
 > Upstream: `NodudeWasTaken/PythonDancer`, itself a Python port of `ncdxncdx/FunscriptDancer`.
 
-## 2.6 architecture
+## Architecture
 
 ```text
 Audio / video
     ↓
-Mixed features + optional Demucs/provided stems
+Mixed features + optional stems
     ↓
 Beat / bar / phrase / section analysis
     ↓
 Continuous Motion Intent
- intensity · aggression · flow · complexity
- symmetry · rotation · translation · accents
+    + section-level overrides
     ↓
-Reference Style / ChoreographyProfile
+Reference Style
     ↓
-Independent axis event planners
- L1 bass · L2 hi-hat · R0 vocal motion
- R1 snare · R2 vocal energy
+Independent six-axis planners
     ↓
-Gesture planner / editable Gesture Timeline
+Gesture Timeline
     ↓
-6D pose planner
+6D pose / velocity / acceleration / jerk optimizer
     ↓
-Cross-axis optimizer
- pose load · simultaneous velocity
- speed · acceleration · jerk
+SR6 mechanical risk + nearest-safe-pose projection
     ↓
-2.5 editing & safety workstation
+Motion Quality Scorer
+ rhythm · phrase · smoothness · diversity
+ coherence · repetition · safety · jerk · stems
     ↓
-Device calibration + latency compensation
+Multi-Candidate / A-B / Best-section Merge
+    ↓
+Auto Improvement of weak ranges
+    ↓
+2.5 keyframe / curve / safety editing
+    ↓
+Calibration + latency compensation
     ↓
 Funscript / TCode / Intiface
 ```
 
-The exported funscript/TCode timeline remains canonical. Device calibration, measured latency, Soft Start and Auto Home are live-output policies unless explicitly saved as project metadata.
+## Quality Intelligence
 
-## Main 2.6 capabilities
+Every plan can be scored from 0–100 on nine dimensions:
 
-### Independent six-axis timing
+- Rhythm alignment
+- Phrase alignment
+- Smoothness
+- Axis diversity
+- Cross-axis coherence
+- Repetition
+- Mechanical safety
+- Jerk comfort
+- Stem responsiveness
 
-L0 remains the primary adaptive stroke planner. In choreography mode, the five secondary axes now choose their own musically meaningful timestamps:
+The scorer also identifies the weakest timeline windows.
+
+```bash
+python -m dancer song.mp3 --cli --yes --multiaxis --quality-score
+```
+
+Write the complete report:
+
+```bash
+--quality-report quality.json
+```
+
+### Multi-candidate generation
+
+Generate and rank 2–8 materially different plans:
+
+```bash
+--quality-candidates 6
+```
+
+Built-in candidate characters include Balanced, Expressive, Rhythm Heavy, Smooth Flow, Rotation Heavy, Deep Translation, Accent Dense and Experimental. Candidate generation varies preset, gesture strength, independent-axis density, accent threshold, optimizer budgets and Motion Intent bias.
+
+Use `--keep-base-candidate` to rank alternatives without automatically adopting the winner.
+
+### A/B preview
+
+The GUI provides Candidate A/B selectors with:
+
+- Preview A / Preview B — non-destructive curve + 3D pose preview;
+- score and strongest metric delta;
+- Use A / Use B only when the user confirms the choice;
+- Reset preview to return to the current editable plan.
+
+### Best-section merge
+
+Each candidate is rescored inside every detected or manually edited Section. PythonDancer can splice the locally best candidate for Intro/Verse/Build/Chorus/Drop/Breakdown/Outro with crossfaded boundaries.
+
+```bash
+--quality-candidates 6 --merge-best-sections
+```
+
+### Auto Improvement
+
+The automatic improvement loop:
+
+```text
+score → weakest range → try candidate replacements
+      → re-score whole track → accept only a real gain → repeat
+```
+
+```bash
+--auto-improve \
+--improve-iterations 4 \
+--improve-target 90 \
+--improve-min-gain 0.35
+```
+
+Locked axes are preserved. A replacement that lowers the score is never accepted.
+
+## Section-level Motion Intent
+
+Each musical section may independently override:
+
+```text
+intensity
+aggression
+flow
+complexity
+symmetry
+rotation_bias
+translation_bias
+accent_density
+```
+
+Overrides have an amount and edge blend. If section boundaries move in the timeline editor, their Intent ranges move with them.
+
+The GUI can **Apply section intent**, **Regenerate section**, or **Clear section intent**. CLI can load JSON:
+
+```bash
+--section-intents section-intents.json
+```
+
+## Mechanical risk and nearest-safe projection
+
+The SR6 firmware-model solver now estimates:
+
+- reachability;
+- maximum servo angle;
+- servo safety margin;
+- finite-difference linkage sensitivity;
+- singularity risk;
+- mean / peak trajectory risk;
+- unsafe and singularity ratios;
+- first unsafe timestamp.
+
+When a requested pose exceeds the configured risk envelope, PythonDancer finds a close safe pose by radial search toward neutral plus coordinate refinement. The projected trajectory is then passed through speed/acceleration/jerk constraints and mechanically checked again.
+
+```bash
+--mechanical-projection \
+--mechanical-max-risk 0.82 \
+--servo-limit-deg 88 \
+--singularity-sensitivity 2.5
+```
+
+For A/B analysis:
+
+```bash
+--no-mechanical-projection
+```
+
+This is a planning/diagnostic safety layer. The TCode device firmware still owns real servo/PWM calibration and control.
+
+## Generation Quality retained from 2.6
+
+PythonDancer keeps:
+
+- independent L1/L2/R0/R1/R2 event clocks;
+- optional Demucs/provided stems;
+- drums/kick/snare/hi-hat, bass, vocal and other stem features;
+- continuous 8D Motion Intent;
+- manual Intent blending;
+- multi-reference style learning and clustering;
+- advanced Gesture Timeline blocks;
+- simultaneous 6D pose/velocity budgets;
+- per-axis speed, acceleration and jerk constraints;
+- SR6 geometry/reachability diagnostics;
+- device calibration limits feeding the optimizer;
+- latency/manual-offset compensation.
+
+Secondary-axis musical mapping:
 
 ```text
 L0 stroke   primary beat/subdivision planner
@@ -57,217 +199,39 @@ R1 roll     snare/drum accents
 R2 pitch    vocal/harmonic energy
 ```
 
-Each axis may insert extra subdivisions when its source feature crosses the configured accent threshold. Section boundaries are also eligible synchronization points.
-
-Disable the layer for A/B testing:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis --no-independent-axes
-```
-
-Control density:
-
-```bash
---axis_density 1.4
---axis_accent_threshold 0.68
-```
-
-### Motion Intent
-
-PythonDancer infers an inspectable 0..1 intent envelope instead of mapping audio directly to fixed formulas:
-
-- `intensity`
-- `aggression`
-- `flow`
-- `complexity`
-- `symmetry`
-- `rotation_bias`
-- `translation_bias`
-- `accent_density`
-
-The workstation shows the global values. The planner samples the envelope at each axis's own timestamps.
-
-CLI:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis --show_intent
-```
-
-### Rich separated-stem features
-
-Stem mode remains optional. PythonDancer can consume an existing directory containing:
-
-```text
-drums.wav
-bass.wav
-vocals.wav
-other.wav
-```
-
-or use an externally installed Demucs backend in `auto` / `required` mode.
-
-2.6 extracts additional source-aware features:
-
-```text
-drums  energy · onset · kick proxy · snare proxy · hi-hat proxy
-bass   energy · onset · low-band energy
-vocals energy · pitch · pitch motion
-other  energy · spectral centroid
-```
-
-Example:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis \
-  --stems auto --stem_dir ./stems/song
-```
-
-Demucs is deliberately not a mandatory package dependency. If it is unavailable, `auto` can fall back while `required` fails explicitly.
-
-### Multi-reference style learning
-
-A single reference bundle still works:
-
-```bash
---reference_bundle favorite.funscript
-```
-
-2.6 also supports multiple bundles and weighted blending:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis \
-  --reference_library ref-a.funscript ref-b.funscript ref-c.funscript \
-  --reference_weights 2 1 1 \
-  --save_learned_profile my-style.json
-```
-
-Optional deterministic style clustering:
-
-```bash
---style_clusters 3
-```
-
-Cluster labels are derived from learned motion character, e.g. Smooth Flow, Rhythm Heavy, Rotation Heavy and Translation Heavy.
-
-Reference learning is statistical style transfer. New motion still follows the new track's beats, structure, stems and Motion Intent; reference timestamps are not copied onto the new song.
-
-### Advanced Gesture Timeline
-
-Gesture blocks support:
-
-```text
-pulse / sway / rock / circle / spiral / wave / accent
-strength
-per-axis mix L0..R2
-phase offset
-cycle count
-forward / reverse direction
-blend-in / blend-out
-```
-
-This makes the timeline closer to a choreography/DAW automation lane instead of a fixed gesture label list.
-
-`.pdance` schema 2 persists these fields. Schema 1 projects remain readable.
-
-### 6D optimizer + jerk limits
-
-After independent planning, PythonDancer projects the combined motion into a configurable safety/quality envelope:
-
-- normalized simultaneous 6D pose budget;
-- normalized simultaneous velocity budget;
-- per-axis maximum speed;
-- per-axis maximum acceleration;
-- per-axis maximum jerk.
-
-Defaults preserve the existing axis hierarchy:
-
-```text
-L0      speed 400   accel 2400   jerk 16000
-L1/L2   speed 180   accel 1000   jerk  7000
-R0      speed 300   accel 1800   jerk 12000
-R1/R2   speed 200   accel 1200   jerk  8000
-```
-
-CLI controls:
-
-```bash
---pose_budget 1.85
---velocity_budget 2.25
---optimizer_iterations 3
-```
-
-Disable for A/B testing:
-
-```bash
---no-motion-optimizer
-```
-
-## Device calibration and timing
-
-### DeviceCalibrationProfile
-
-A calibration JSON can define each axis's:
-
-```text
-minimum / maximum
-neutral
-inverted
-max_speed
-max_acceleration
-max_jerk
-```
-
-Normalized choreography is mapped piecewise around the configured neutral:
-
-```text
-0   → minimum
-50  → neutral
-100 → maximum
-```
-
-The workstation can run a conservative one-axis-at-a-time ±5% verification sequence. Keep access to device STOP/emergency power during any hardware test.
-
-CLI:
-
-```bash
---calibration_profile my-sr6.json
-```
-
-### Latency compensation
-
-Live playback can schedule commands earlier by a configured transport/device latency:
-
-```bash
---latency_ms 45
---manual_offset_ms -8
-```
-
-For serial devices, PythonDancer can estimate request/response timing using harmless `D1` queries and use half the median RTT as a one-way scheduling estimate:
-
-```bash
---measure_latency
-```
-
-The timing profile records latency and jitter. Mechanical latency may differ from protocol RTT, so manual offset remains available.
-
-## 2.5 editing & safety layer retained
-
-2.6 keeps the full 2.5 workstation:
+## Editing & device layer retained from 2.5
 
 - direct keyframe add/drag/delete;
-- Beat Snap / nearest / floor / ceil quantization;
+- Beat Snap / Quantize;
 - Linear / Smoothstep / PCHIP / Makima interpolation;
-- Motion Heatmap and combined Risk Heatmap;
-- Smart Limit `safe / balanced / open` profiles;
-- music-aware ambient/beat/repeat gap filling;
+- Motion/Risk Heatmaps;
+- Smart cross-axis limits;
+- music-aware gap filling;
 - Axis Link gain/delay/smoothing/position-or-velocity/only-if-empty;
+- Solo / Mute / Lock;
+- local regeneration;
 - Soft Start and optional Auto Home;
-- `.pdance` projects, autosave, recent projects and full Undo/Redo;
-- Intiface Central / Buttplug v4;
-- exception-safe serial DSTOP behavior;
-- speed-aware TCode `I<ms>` scaling while safety ramps stay real-time.
+- `.pdance` project, autosave, recent projects and Undo/Redo;
+- serial TCode v0.3 and D0/D1/D2;
+- speed-aware TCode `I<ms>`;
+- exception-safe `DSTOP`;
+- Intiface Central / Buttplug v4.
 
-## Workstation layout
+## `.pdance` schema 3
+
+2.7 projects persist the complete editable workspace plus Quality Intelligence state:
+
+- last QualityReport;
+- candidate plans and scores;
+- A/B selection;
+- section-level Intent;
+- mechanical-projection settings;
+- Auto Improvement parameters/history;
+- language, SR6 geometry, calibration, Gesture/Curve/Safety/Device settings.
+
+Schema 1 and 2 projects remain readable.
+
+## Bilingual workstation / 中英双语 GUI
 
 Run:
 
@@ -275,90 +239,39 @@ Run:
 python -m dancer scene.mp4 --multiaxis
 ```
 
-The GUI keeps the 2.4/2.5 workflow and adds:
+The Language menu switches at runtime:
 
 ```text
-Left
-  Motion setup
-  Musical intelligence
-  Axis controls
-  Safety & shaping
-  Generation Quality
-
-Center
-  Motion plots
-  Wave/Section/Gesture timeline
-  3D pose
-  Curve editor
-  Diagnostics
-  Intent / Gesture
-
-Right
-  Local regenerate
-  TCode device
-  Export
-  Project
-  Intiface
-  Playback safety
-  Timing & calibration
+简体中文
+English
 ```
 
-Generation Quality exposes independent-axis density/threshold, optimizer budgets/passes and the current Motion Intent. The Intent/Gesture tab exposes advanced gesture block settings.
+Quality Intelligence, candidates, A/B preview, automatic improvement, Section Intent, mechanical risk, existing editing/device controls, status text and dialogs are localized. Engine tokens such as `balanced`, `forward`, `L0` and protocol data stay unchanged.
 
-## Install
+CJK rendering uses installed system fonts; PythonDancer does not bundle font files.
 
-Python 3.10+ is supported.
-
-Minimal source install:
-
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -e .
-```
-
-Intiface support for source installs:
-
-```bash
-pip install -e '.[intiface]'
-```
-
-Development/tests:
-
-```bash
-pip install -e '.[test,intiface]'
-python -m pytest
-```
-
-Desktop release builds install Intiface support automatically. macOS release apps bundle FFmpeg. Demucs remains optional/external.
+Detailed Chinese guide: `docs/PythonDancer-2.7-ZH-CN.md`.
 
 ## CLI examples
 
-Default 2.6 six-axis generation:
+Default six-axis generation:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis
 ```
 
-Stem-aware expressive choreography:
+Generate six candidates, merge the best sections and auto-improve:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis \
-  --multiaxis_preset expressive \
   --stems auto \
-  --gesture_strength 1.25 \
-  --axis_density 1.2
+  --quality-candidates 6 \
+  --merge-best-sections \
+  --auto-improve \
+  --quality-report song-quality.json
 ```
 
-Inspect sections and Motion Intent:
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis \
-  --show_sections --show_intent
-```
-
-TCode live playback with calibration/latency:
+Live serial playback with calibration/latency:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis \
@@ -375,6 +288,32 @@ python -m dancer song.mp3 --cli --yes --multiaxis \
   --intiface --intiface_address ws://127.0.0.1:12345
 ```
 
+## Install
+
+Python 3.10+:
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -e .
+```
+
+Intiface source install:
+
+```bash
+pip install -e '.[intiface]'
+```
+
+Development/tests:
+
+```bash
+pip install -e '.[test,intiface]'
+python -m pytest
+```
+
+Desktop release builds install Intiface support automatically. FFmpeg is bundled in macOS packages. Demucs remains optional/external.
+
 ## Output bundle
 
 ```text
@@ -384,67 +323,33 @@ scene.sway.funscript   L2 sway
 scene.twist.funscript  R0 twist
 scene.roll.funscript   R1 roll
 scene.pitch.funscript  R2 pitch
-scene.motion.json      manifest / generation metadata
+scene.motion.json      manifest / metadata
 ```
 
-The 2.6 manifest is version `1.4` and may include section analysis, Motion Intent, independent-axis settings, optimizer settings, learned profile and stem-analysis metadata.
+The 2.7 motion manifest is version **1.5**. Normalized Funscript motion remains 0–100; device-specific ranges stay in calibration/live-output policy unless saved as project metadata.
 
-## TCode and live safety
+## macOS
 
-TCode v0.3 support includes:
-
-- D0/D1/D2 discovery;
-- D2 saved-range mapping;
-- multi-axis ramp commands;
-- scheduled `.tcode` export;
-- Play / Pause / Resume / Seek;
-- `DSTOP` on stop/interruption and best-effort `DSTOP` on exceptional serial-context exit;
-- live playback-speed-aware `I<ms>` intervals;
-- Soft Start synchronization;
-- optional Auto Home.
-
-When L0 is muted, remaining axes can provide the TCode event timeline.
-
-## Intiface / Buttplug
-
-Default server:
-
-```text
-ws://127.0.0.1:12345
-```
-
-Generic mapping currently uses:
-
-```text
-L0 position               → POSITION_WITH_DURATION
-six-axis motion intensity → VIBRATE
-absolute R0 excursion     → ROTATE
-```
-
-Unsupported outputs are skipped.
-
-## macOS packaging
-
-Release builds target native:
+Native packages target:
 
 ```text
 macOS arm64
 macOS Intel x86_64
 ```
 
-FFmpeg is bundled. Builds are ad-hoc signed but not Apple-notarized; first launch may require Control-click/right-click → **Open**.
+Builds are ad-hoc signed but not Apple-notarized. First launch may require Control-click/right-click → **Open**.
 
-## Development status
+## Validation gate
 
-2.6 is developed on top of the fully validated 2.5 branch. Before merge/release, the final 2.6 head must pass:
+A release candidate is considered validated only after the same final commit passes:
 
 ```text
 Python 3.10 tests
 Python 3.12 tests
 Python 3.13 tests
-Windows PyInstaller build
-macOS arm64 app/ZIP/DMG build
-macOS Intel x86_64 app/ZIP/DMG build
+Windows PyInstaller build + artifact
+macOS arm64 app/ZIP/DMG + artifact
+macOS Intel x86_64 app/ZIP/DMG + artifact
 ```
 
-Do not treat an intermediate feature-branch artifact as a published release until the tagged GitHub Release exists.
+A workflow artifact is not the same thing as a published GitHub Release.
