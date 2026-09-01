@@ -25,6 +25,8 @@ hiddenimports = sorted(set(
 		"dancer.workstation_ui_v26_release",
 		"dancer.workstation_ui_v27",
 		"dancer.workstation_ui_v27_release",
+		"dancer.workstation_ui_v27_hotfix",
+		"dancer.workstation_ui_v27_async",
 		"dancer.editing",
 		"dancer.safety",
 		"dancer.project",
