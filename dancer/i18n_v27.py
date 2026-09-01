@@ -54,6 +54,7 @@ def install_v27_translations() -> None:
         "Maximum risk": "最大风险",
         "Servo limit": "舵机角度限制",
         "Singularity sensitivity": "奇异性敏感度",
+        "Apply mechanical policy": "应用机械策略",
         "Quality Intelligence: generate or score a track": "质量智能：生成或评估一条轨迹",
         "A/B: generate candidates first": "A/B：请先生成候选方案",
         "Auto Improvement: not run": "自动优化：尚未运行",
@@ -61,6 +62,13 @@ def install_v27_translations() -> None:
         "Section Intent: select a section": "分段 Intent：请选择段落",
     })
     extra = (
+        ("Mechanical policy applied", "机械策略已应用"),
+        ("current plan and candidates rescored", "当前方案与候选方案已重新评分"),
+        ("current mechanical policy", "当前机械策略"),
+        ("locked axes preserved", "已保留锁定轴"),
+        ("Finish the current Quality Intelligence task", "请先完成当前质量智能任务"),
+        ("Finish the current track generation", "请先完成当前轨迹生成任务"),
+        ("Stop device playback before", "请先停止设备播放，再"),
         ("Quality Intelligence failed", "质量智能处理失败"),
         ("Quality scoring failed", "质量评分失败"),
         ("Quality Intelligence", "质量智能"),
