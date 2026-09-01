@@ -18,11 +18,19 @@ hiddenimports = sorted(set(
 		"serial.tools.list_ports",
 		"dancer.workstation_ui_v25",
 		"dancer.workstation_ui_v25_final",
+		"dancer.workstation_ui_v26",
 		"dancer.editing",
 		"dancer.safety",
 		"dancer.project",
 		"dancer.outputs",
 		"dancer.tcode_speed",
+		"dancer.intent",
+		"dancer.independent_planner",
+		"dancer.optimizer",
+		"dancer.reference_library",
+		"dancer.latency",
+		"dancer.calibration",
+		"dancer.cli_v26",
 	]
 ))
 
