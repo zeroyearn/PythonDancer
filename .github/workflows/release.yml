@@ -2,7 +2,7 @@ name: Release PythonDancer
 
 on:
   push:
-    branches: ["master"]
+    branches: ["master", "feat/generation-quality-2.6"]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
