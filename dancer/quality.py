@@ -241,6 +241,26 @@ def _stem_score(data: Mapping | None, beats: np.ndarray, times: np.ndarray, velo
     return float(np.clip(50.0 + 50.0 * np.mean(correlations), 0.0, 100.0))
 
 
+def _slice_sections(sections: Sequence[Mapping] | None, start: float, end: float) -> list[dict[str, object]]:
+    """Clip global section metadata into one rebased local scoring window."""
+    local: list[dict[str, object]] = []
+    for section in sections or ():
+        try:
+            section_start = float(section.get("start", 0.0))
+            section_end = float(section.get("end", end))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        clipped_start = max(float(start), section_start)
+        clipped_end = min(float(end), section_end)
+        if clipped_end <= clipped_start + 1e-9:
+            continue
+        item = dict(section)
+        item["start"] = clipped_start - float(start)
+        item["end"] = clipped_end - float(start)
+        local.append(item)
+    return local
+
+
 def _weak_windows(plan, data, sections, geometry, mech_config, window_seconds: float, threshold: float) -> tuple[QualityWindow, ...]:
     duration = _duration(plan, data)
     if duration <= window_seconds * 0.75:
@@ -265,7 +285,15 @@ def _weak_windows(plan, data, sections, geometry, mech_config, window_seconds: f
                     continue
                 if arr.size >= beats.size and indices.size:
                     local_data[key] = arr[indices]
-        report = score_plan(local_plan, local_data, sections=None, geometry=geometry, mechanical_config=mech_config, compute_windows=False)
+        local_sections = _slice_sections(sections, start, end)
+        report = score_plan(
+            local_plan,
+            local_data,
+            sections=local_sections,
+            geometry=geometry,
+            mechanical_config=mech_config,
+            compute_windows=False,
+        )
         if report.overall < threshold:
             weakest = min(report.metrics, key=report.metrics.get)
             result.append(QualityWindow(float(start), float(end), float(report.overall), weakest))
