@@ -2,11 +2,6 @@
 from __future__ import annotations
 
 
-# Keep the public ``dancer.tcode.TCodePlaybackController`` name backward
-# compatible while upgrading its live playback timing. The subclass scales
-# musical TCode I<ms> intervals with playback speed but leaves seek / Soft Start
-# safety ramps in real milliseconds. Serial context-manager failures also
-# best-effort DSTOP before close without masking the original exception.
 def _install_tcode_runtime_safety():
     from . import tcode
     from .tcode_speed import SpeedAwareTCodePlaybackController
@@ -40,11 +35,11 @@ def main():
     prepare_runtime_path()
     args = cli_args().parse_args()
     if args.cli:
-        from .cli_v26 import cmd
+        from .cli_v26_final import cmd
         return cmd(args)
 
     if args.multiaxis:
-        from .workstation_ui_v26 import ux
+        from .workstation_ui_v26_final import ux
         ux(args)
         return 0
 
