@@ -135,7 +135,13 @@ class MultiAxisWindow(_ReleaseWindow):
         if self.worker and self.worker.is_alive():
             messagebox.showwarning("PythonDancer", "Finish the current track generation before generating candidates.")
             return
-        if self.data is None or self.generated_config is None or (self.quality_worker and self.quality_worker.is_alive()):
+        if (
+            self.data is None
+            or self.generated_config is None
+            or self.base_plan is None
+            or self.workspace is None
+            or (self.quality_worker and self.quality_worker.is_alive())
+        ):
             return
         try:
             count = max(2, min(8, int(self.quality_candidate_count_var.get())))
@@ -247,11 +253,12 @@ class MultiAxisWindow(_ReleaseWindow):
 
     def _candidates_done(self, results):
         final = list(results) if self._candidate_cache_is_current() else self._rescore_candidate_list(results)
-        # Skip the release-layer unconditional rescore: the worker already
-        # scored effective output when the editor context stayed unchanged.
-        _WorkerScoredWindow._candidates_done(self, final)
+        # Publish the context before the inherited completion callback invokes
+        # dynamic self.compare_ab(); otherwise a mid-worker editor change makes
+        # the already-rescored result immediately rescore a second time.
         self._candidate_generation_context = self._candidate_context()
         self._candidate_scores_stale = False
+        _WorkerScoredWindow._candidates_done(self, final)
         self._mark_changed()
 
     def _refresh_candidate_scores(self, *, mark_changed=False):
