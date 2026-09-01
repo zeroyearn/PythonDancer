@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from dancer.candidates import generate_candidates
 from dancer.cli_v27 import add_cli_arguments
@@ -67,6 +68,21 @@ def test_section_intent_override_only_changes_selected_range():
     assert values[8] == .2
 
 
+def test_section_intent_amount_is_exact_inside_section():
+    beats = tuple(float(v) for v in range(10))
+    base = MotionIntent(**{field: .2 for field in INTENT_FIELDS})
+    envelope = IntentEnvelope(beats, {field: tuple(.2 for _ in beats) for field in INTENT_FIELDS}, base)
+    target = MotionIntent(**{field: (.9 if field == "intensity" else .2) for field in INTENT_FIELDS})
+    result = apply_section_intent_overrides(envelope, [SectionIntentOverride(2.0, 7.0, target, .2, "verse", .25)])
+    # Interior alpha must be exactly 0.2: .2 * .8 + .9 * .2 = .34.
+    assert result.fields["intensity"][4] == pytest.approx(.34)
+
+
+def test_section_intent_rejects_range_collapsed_by_zero_clamp():
+    with pytest.raises(ValueError):
+        SectionIntentOverride(-2.0, -1.0)
+
+
 def test_mechanical_projection_reduces_extreme_pose_risk():
     config = MechanicalProjectionConfig(max_risk=.45, servo_limit_deg=88.0)
     neutral = {axis: 50.0 for axis in AXIS_ORDER}
@@ -82,14 +98,43 @@ def test_mechanical_projection_reduces_extreme_pose_risk():
         assert final.risk <= config.max_risk + 1e-6
 
 
-def test_plan_projection_preserves_axes_and_bounds():
+def test_plan_projection_preserves_axes_bounds_and_original_timestamps():
     plan = {axis: [(0.0, 50.0), (1.0, 95.0), (2.0, 50.0)] for axis in AXIS_ORDER}
     projected, diagnostics = project_plan_to_safe(plan, config=MechanicalProjectionConfig(max_risk=.55))
     assert tuple(projected) == AXIS_ORDER
     for axis in AXIS_ORDER:
-        assert len(projected[axis]) == len(plan[axis])
+        original_times = {at for at, _ in plan[axis]}
+        projected_times = {at for at, _ in projected[axis]}
+        assert original_times <= projected_times
         assert all(0.0 <= pos <= 100.0 for _, pos in projected[axis])
     assert diagnostics["samples"] > 0
+    assert diagnostics["unsafe_ratio"] == 0.0
+
+
+def test_async_axis_projection_inserts_cross_clock_safety_keyframes():
+    plan = {
+        "L0": [(0.0, 50.0), (2.0, 100.0), (4.0, 50.0)],
+        "L1": [(0.0, 50.0), (1.0, 100.0), (4.0, 50.0)],
+        "L2": [(0.0, 50.0), (1.0, 0.0), (4.0, 50.0)],
+        "R0": [(0.0, 50.0), (1.0, 100.0), (4.0, 50.0)],
+        "R1": [(0.0, 50.0), (1.0, 100.0), (4.0, 50.0)],
+        "R2": [(0.0, 50.0), (1.0, 0.0), (4.0, 50.0)],
+    }
+    config = MechanicalProjectionConfig(max_risk=.45, servo_limit_deg=88.0)
+    projected, diagnostics = project_plan_to_safe(plan, config=config)
+    assert diagnostics["projected_samples"] > 0
+    assert diagnostics["inserted_keyframes"] > 0
+    assert diagnostics["unsafe_ratio"] == 0.0
+    # L0 had no 1s keyframe originally; if its safe projected value changed at
+    # that cross-axis event, the new implementation persists it explicitly.
+    assert len(projected["L0"]) >= len(plan["L0"])
+
+
+def test_mechanical_config_rejects_non_finite_values():
+    with pytest.raises(ValueError):
+        MechanicalProjectionConfig(max_risk=float("nan"))
+    with pytest.raises(ValueError):
+        MechanicalProjectionConfig(finite_difference_step=0.0)
 
 
 def test_candidate_generation_is_ranked_and_distinct():
