@@ -7,6 +7,7 @@ from typing import Mapping, Sequence
 from .candidates import CandidateResult, generate_candidates
 from .kinematics import SR6Geometry
 from .multiaxis import MultiAxisConfig
+from .plan_window import slice_plan
 from .quality import QualityReport, score_plan
 from .workspace import splice_plan
 
@@ -94,9 +95,10 @@ def auto_improve(
         best_score = report.overall
         best_name = ""
         for candidate in bank:
+            replacement = slice_plan(candidate.plan, weak.start, weak.end, rebase=False)
             merged = splice_plan(
                 current,
-                candidate.plan,
+                replacement,
                 weak.start,
                 weak.end,
                 locked_axes=locked_axes,
