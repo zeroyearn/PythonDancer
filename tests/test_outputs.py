@@ -1,4 +1,5 @@
 import asyncio
+from threading import Event
 
 import dancer.outputs as outputs
 from dancer.outputs import DEFAULT_INTIFACE_ADDRESS, intiface_frames
@@ -100,3 +101,64 @@ def test_intiface_soft_start_moves_to_start_pose_before_normal_outputs(monkeypat
     assert any(cmd.output_type == OutputType.VIBRATE and cmd.value > 0 for cmd in device.commands[3:])
     assert device.stop_count >= 1
     assert Client.last.disconnected is True
+
+
+def test_intiface_prestart_stop_sends_no_motion(monkeypatch):
+    class OutputType:
+        POSITION_WITH_DURATION = "position"
+        VIBRATE = "vibrate"
+        ROTATE = "rotate"
+
+    class Command:
+        def __init__(self, output_type, value, duration=None):
+            self.output_type = output_type
+            self.value = value
+            self.duration = duration
+
+    class Device:
+        def __init__(self):
+            self.commands = []
+            self.stop_count = 0
+
+        def has_output(self, _kind):
+            return True
+
+        async def run_output(self, command):
+            self.commands.append(command)
+
+        async def stop(self):
+            self.stop_count += 1
+
+    class Client:
+        last = None
+
+        def __init__(self, _name):
+            self.device = Device()
+            self.devices = {1: self.device}
+            Client.last = self
+
+        async def connect(self, _address):
+            return None
+
+        async def disconnect(self):
+            return None
+
+        async def start_scanning(self):
+            return None
+
+        async def stop_scanning(self):
+            return None
+
+    monkeypatch.setattr(outputs, "_imports", lambda: (Client, Command, OutputType))
+    stop = Event()
+    stop.set()
+    plan = {
+        "L0": [(0.0, 80.0), (1.0, 20.0)],
+        "L1": [], "L2": [], "R0": [], "R1": [], "R2": [],
+    }
+
+    asyncio.run(outputs.play_plan_intiface(plan, device_index=1, soft_start_ms=1000, stop_event=stop))
+
+    device = Client.last.device
+    assert device.commands == []
+    assert device.stop_count >= 1
