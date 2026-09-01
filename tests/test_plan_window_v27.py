@@ -8,7 +8,8 @@ def test_slice_plan_inserts_interpolated_window_boundaries():
     plan = {axis: [] for axis in AXIS_ORDER}
     plan["L0"] = [(0.0, 0.0), (10.0, 100.0)]
     sliced = slice_plan(plan, 4.0, 6.0, rebase=True)
-    assert sliced["L0"] == pytest.approx([(0.0, 40.0), (2.0, 60.0)])
+    assert [at for at, _ in sliced["L0"]] == pytest.approx([0.0, 2.0])
+    assert [pos for _, pos in sliced["L0"]] == pytest.approx([40.0, 60.0])
     assert sliced["L1"] == []
 
 
