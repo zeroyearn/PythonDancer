@@ -6,6 +6,7 @@ block_cipher = None
 
 hiddenimports = sorted(set(
 	collect_submodules("buttplug")
+	+ collect_submodules("sounddevice")
 	+ [
 		"librosa",
 		"librosa.feature",
@@ -27,6 +28,8 @@ hiddenimports = sorted(set(
 		"dancer.workstation_ui_v27_release",
 		"dancer.workstation_ui_v27_hotfix",
 		"dancer.workstation_ui_v27_async",
+		"dancer.workstation_ui_v28",
+		"dancer.workstation_ui_v28_final",
 		"dancer.editing",
 		"dancer.safety",
 		"dancer.project",
@@ -44,6 +47,7 @@ hiddenimports = sorted(set(
 		"dancer.i18n",
 		"dancer.i18n_safe",
 		"dancer.i18n_v27",
+		"dancer.i18n_v28",
 		"dancer.section_intent",
 		"dancer.mechanical_safety",
 		"dancer.quality",
@@ -51,10 +55,17 @@ hiddenimports = sorted(set(
 		"dancer.comparison",
 		"dancer.improvement",
 		"dancer.plan_window",
+		"dancer.automation",
+		"dancer.daw_transform",
+		"dancer.candidate_composer",
+		"dancer.device_twin",
+		"dancer.live",
+		"dancer.live_io",
 		"dancer.cli_v26",
 		"dancer.cli_v26_final",
 		"dancer.cli_v26_release",
 		"dancer.cli_v27",
+		"dancer.cli_v28",
 	]
 ))
 

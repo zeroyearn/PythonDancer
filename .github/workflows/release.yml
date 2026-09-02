@@ -8,7 +8,7 @@ on:
       tag:
         description: "Release tag"
         required: false
-        default: "v2.7.0"
+        default: "v2.8.0"
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then TAG="${GITHUB_REF_NAME}"
           elif [[ -n "${INPUT_TAG}" ]]; then TAG="${INPUT_TAG}"
-          else TAG="v2.7.0"; fi
+          else TAG="v2.8.0"; fi
           if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release tag: ${TAG}" >&2
             exit 2
@@ -77,7 +77,7 @@ jobs:
             python -m pip install --only-binary=:all: "numba==0.61.2" "llvmlite==0.44.0"
           fi
       - name: Install
-        run: python -m pip install -e '.[build,test,intiface]'
+        run: python -m pip install -e '.[build,test,intiface,live]'
       - name: Compile and test
         shell: bash
         run: |
@@ -107,7 +107,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: python -m pip install -e '.[build,test,intiface]'
+        run: python -m pip install -e '.[build,test,intiface,live]'
       - name: Compile and test
         shell: pwsh
         run: |
@@ -118,6 +118,9 @@ jobs:
         run: |
           python builder.py
           if (-not (Test-Path "dist/PythonDancer.exe")) { throw "PythonDancer.exe missing" }
+          $help = & "dist/PythonDancer.exe" --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Frozen PythonDancer.exe --help failed" }
+          if ($help -notmatch "live-prediction-ms") { throw "PythonDancer 2.8 Live CLI missing from frozen executable" }
           $version = "${{ needs.preflight.outputs.version }}"
           $archive = "PythonDancer-$version-Windows-x86_64.zip"
           Compress-Archive -Path "dist/*" -DestinationPath $archive -Force
@@ -148,39 +151,42 @@ jobs:
         shell: bash
         run: |
           cat > RELEASE_NOTES.md <<'EOF'
-          ## PythonDancer 2.7.0 — Quality Intelligence / 质量智能
+          ## PythonDancer 2.8.0 — AI Choreography DAW / AI 六轴编舞工作站
 
-          PythonDancer 2.7 adds a scored, self-improving choreography layer on top of the 2.6 stem-aware six-axis workstation.
+          PythonDancer 2.8 turns the 2.7 Quality Intelligence workstation into a DAW-style choreography environment while preserving the validated six-axis, project, safety and bilingual workflows.
 
-          ### Quality Intelligence
-          - nine-part Motion Quality scoring: rhythm, phrase structure, smoothness, axis diversity, cross-axis coherence, repetition, mechanical safety, jerk comfort and stem responsiveness;
-          - weak-range detection with ranked multi-candidate generation;
-          - non-destructive A/B preview, candidate adoption and best-section merge;
-          - Auto Improvement only accepts replacements that improve the full-track score;
-          - section-level Motion Intent with exact override blending and local regeneration;
-          - candidate/project persistence now retains the selected generation character and optimizer settings.
+          ### DAW editing
+          - timeline Automation Lanes for energy, stroke depth, rotation mix, gesture density, smoothing, complexity and safety aggressiveness;
+          - Style Morphing keyframes interpolate continuous Motion Intent and movement strength through the song;
+          - manual Candidate Composer assigns different generated candidates to individual sections and blends their raw editable plans;
+          - existing waveform/beat grid, Gesture Timeline, curve editor, Solo/Mute/Lock, local regeneration, A/B and Auto Improvement remain part of one non-destructive output chain;
+          - default DAW state is a strict identity transform, so opening a 2.7 project does not silently change its motion.
 
-          ### Mechanical safety
-          - SR6 reachability, servo margin, linkage sensitivity and singularity-risk scoring;
-          - nearest-safe-pose projection with configurable risk and servo limits;
-          - independent-axis projection persists required cross-clock safety keyframes so interpolation cannot immediately reconstruct a corrected unsafe union pose;
-          - generated motion is still reprocessed through the existing speed / acceleration / jerk optimizer;
-          - firmware remains responsible for final device-specific servo/PWM calibration and emergency safety.
+          ### Live Choreography
+          - optional sounddevice capture for microphone/system-routed audio inputs;
+          - streaming spectral features, predictive beat scheduling and bounded six-axis Live motion;
+          - configurable BPM and prediction horizon;
+          - preview-only Live mode or direct TCode serial output;
+          - Live output passes through Device Twin mechanical safe-pose projection and calibration before hardware commands.
 
-          ### Workstation / CLI
-          - new Quality Intelligence desktop tab with scoring, candidates, A/B, best-section merge, Auto Improvement, section Intent and mechanical controls;
-          - Simplified Chinese / English localization while engine tokens and TCode protocol values remain untranslated;
-          - CLI flags for scoring, candidates, section merging, auto-improvement, section Intent JSON and SR6 mechanical policy;
-          - `.pdance` schema 3 and motion manifest 1.5; schema 1/2 projects remain readable.
+          ### Device Twin
+          - one portable profile combines SR6 geometry, per-axis calibration, velocity/acceleration/jerk limits, transport timing and mechanical-risk policy;
+          - Device Twin safe mode feeds both offline final constraints and Live per-frame safety;
+          - firmware remains responsible for final device-specific PWM/servo behavior and emergency safety.
+
+          ### Project / CLI / localization
+          - `.pdance` schema 4 persists Automation, Style Morph, Candidate Composer, Device Twin and Live settings; schemas 1/2/3 remain readable;
+          - CLI supports Automation/Style/Composer/Device Twin JSON plus predictive `--live` mode;
+          - Simplified Chinese and English cover the new DAW and Live surfaces while engine tokens and TCode values remain untranslated.
 
           ### Packages
           - Windows x86_64;
           - native macOS arm64;
           - native macOS Intel x86_64;
-          - FFmpeg bundled in macOS packages; Demucs remains optional/external.
+          - FFmpeg bundled on macOS; Intiface and Live audio dependencies included in desktop packages; Demucs remains optional/external.
 
           ### macOS note
-          macOS bundles are ad-hoc signed but are not Apple-notarized. On first launch macOS may require Control-click/right-click → Open.
+          macOS bundles are ad-hoc signed but are not Apple-notarized. On first launch macOS may require Control-click/right-click → Open. Live audio capture requires microphone/audio-input permission when Live mode is started.
           EOF
       - name: Publish GitHub Release
         shell: bash

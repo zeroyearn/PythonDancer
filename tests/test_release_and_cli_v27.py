@@ -83,16 +83,21 @@ def test_windows_desktop_entry_preserves_explicit_arguments(monkeypatch):
     assert calls == [("PythonDancer.exe", "--cli", "song.mp3")]
 
 
-def test_release_workflow_is_explicit_and_targets_27():
+def test_release_workflow_is_explicit_and_targets_28():
     text = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert 'default: "v2.7.0"' in text
-    assert 'else TAG="v2.7.0"' in text
+    assert 'default: "v2.8.0"' in text
+    assert 'else TAG="v2.8.0"' in text
     assert 'branches:' not in text
     assert 'tags: ["v*"]' in text
-    assert "PythonDancer 2.7.0 — Quality Intelligence" in text
+    assert "PythonDancer 2.8.0 — AI Choreography DAW" in text
+    assert "live-prediction-ms" in text
+    assert ".[build,test,intiface,live]" in text
 
 
-def test_windows_bundle_is_gui_only_and_freezes_plan_window():
+def test_windows_bundle_is_gui_only_and_freezes_28_runtime():
     text = Path("qt.spec").read_text(encoding="utf-8")
     assert "console=False" in text
     assert '"dancer.plan_window"' in text
+    assert '"dancer.cli_v28"' in text
+    assert '"dancer.workstation_ui_v28_final"' in text
+    assert '"sounddevice"' in text
