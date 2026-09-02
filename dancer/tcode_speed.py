@@ -12,9 +12,12 @@ unscaled.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from time import monotonic, sleep
 import re
 
-from .tcode import TCodePlaybackController
+import numpy as np
+
+from .tcode import TCodePlaybackController, build_tcode_events
 
 _INTERVAL_RE = re.compile(r"I(\d+)")
 
@@ -61,7 +64,13 @@ class _IntervalScaledDevice:
 
 
 class SpeedAwareTCodePlaybackController(TCodePlaybackController):
-    """TCode controller that scales musical interpolation intervals by speed."""
+    """TCode controller that scales musical interpolation intervals by speed.
+
+    STOP is sticky for the lifetime of a controller. This matters during a GUI
+    Soft Start: a stop request that lands immediately before ``play()`` must not
+    be cleared by the playback entry point and accidentally restart hardware.
+    Create a new controller for a new playback session.
+    """
 
     def __init__(self, plan, device, *, speed: float = 1.0, **kwargs):
         self.raw_device = device
@@ -73,3 +82,130 @@ class SpeedAwareTCodePlaybackController(TCodePlaybackController):
         # must not become shorter at >1x playback or longer at <1x playback.
         with self.interval_device.unscaled():
             super()._sync_position(position)
+
+    def play(self, *, start_at: float = 0.0) -> None:
+        offset = float(np.clip(float(start_at), 0.0, self.duration))
+        with self._condition:
+            self._position = offset
+            if self._stop_requested:
+                self._state = "stopped"
+                self._base_real = None
+                self.device.stop()
+                return
+            self._seek_requested = None
+            self._paused = False
+            self._state = "playing"
+        if offset > 0:
+            self.device.stop()
+            self._sync_position(offset)
+
+        while True:
+            events = build_tcode_events(self.plan, start_at=offset, profile=self.profile)
+            index = 0
+            with self._condition:
+                self._base_real = monotonic() - offset / self.speed
+                self._state = "paused" if self._paused else "playing"
+            restart = False
+            restart_sync = False
+
+            while index < len(events):
+                with self._condition:
+                    if self._stop_requested:
+                        if self._base_real is not None and self._state == "playing":
+                            self._position = float(np.clip((monotonic() - self._base_real) * self.speed, 0.0, self.duration))
+                        self._state = "stopped"
+                        self._base_real = None
+                        self.device.stop()
+                        return
+                    if self._seek_requested is not None:
+                        offset = self._seek_requested
+                        self._seek_requested = None
+                        self._position = offset
+                        self.device.stop()
+                        restart = True
+                        restart_sync = True
+                        break
+                    if self._paused:
+                        self._condition.wait(timeout=0.05)
+                        continue
+                    if self._state == "paused":
+                        offset = self._position
+                        restart = True
+                        restart_sync = True
+                        self._state = "playing"
+                        break
+
+                event = events[index]
+                deadline = self._base_real + event.send_at / self.speed
+                while True:
+                    with self._condition:
+                        if self._stop_requested:
+                            restart = True
+                            restart_sync = False
+                            break
+                        if self._seek_requested is not None:
+                            restart = True
+                            restart_sync = True
+                            break
+                        if self._paused:
+                            restart = True
+                            restart_sync = False
+                            break
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        break
+                    sleep(min(remaining, 0.02))
+                if restart:
+                    break
+                self.device.send(event.command)
+                with self._condition:
+                    self._position = min(event.send_at, self.duration)
+                index += 1
+
+            if restart:
+                with self._condition:
+                    if self._stop_requested:
+                        continue
+                    if self._seek_requested is not None:
+                        offset = self._seek_requested
+                        self._seek_requested = None
+                        self._position = offset
+                        restart_sync = True
+                    else:
+                        offset = self._position
+                    paused = self._paused
+                self.device.stop()
+                if restart_sync and (not paused or self._seek_requested is None):
+                    self._sync_position(offset)
+                continue
+
+            if events:
+                final_target = events[-1].target_at
+                target_deadline = self._base_real + final_target / self.speed
+                while monotonic() < target_deadline:
+                    with self._condition:
+                        if self._stop_requested:
+                            restart = True
+                            restart_sync = False
+                            break
+                        if self._seek_requested is not None:
+                            restart = True
+                            restart_sync = True
+                            break
+                        if self._paused:
+                            restart = True
+                            restart_sync = False
+                            break
+                    sleep(min(0.02, max(0.0, target_deadline - monotonic())))
+                if restart:
+                    offset = self.position
+                    self.device.stop()
+                    if restart_sync:
+                        self._sync_position(offset)
+                    continue
+
+            with self._condition:
+                self._position = self.duration
+                self._state = "finished"
+                self._base_real = None
+            return

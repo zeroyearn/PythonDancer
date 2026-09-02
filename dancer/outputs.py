@@ -77,10 +77,18 @@ def discover_intiface_devices_sync(address: str = DEFAULT_INTIFACE_ADDRESS, scan
 
 
 def _timeline(plan: Mapping[str, Sequence[tuple[float, float]]]):
-    preferred = plan.get("L0") or ()
-    if preferred:
-        return [float(at) for at, _ in preferred]
-    return sorted({float(at) for actions in plan.values() for at, _ in actions})
+    """Return the union clock for independent six-axis motion.
+
+    PythonDancer 2.6+ allows L1/L2/R0/R1/R2 to carry keyframes between L0
+    actions. Intiface must therefore schedule every axis event rather than using
+    L0 as the sole clock, otherwise secondary-axis accents are silently missed.
+    """
+    return sorted({
+        float(at)
+        for actions in plan.values()
+        for at, _ in actions
+        if np.isfinite(at)
+    })
 
 
 def intiface_frames(plan: Mapping[str, Sequence[tuple[float, float]]]):
@@ -105,6 +113,22 @@ def intiface_frames(plan: Mapping[str, Sequence[tuple[float, float]]]):
         frames.append((at, duration_ms, position, intensity, rotation))
         previous = (at, position)
     return frames
+
+
+def _stop_requested(stop_event) -> bool:
+    return stop_event is not None and stop_event.is_set()
+
+
+async def _interruptible_wait(seconds: float, stop_event) -> bool:
+    """Wait up to ``seconds`` and return True as soon as STOP is requested."""
+    deadline = time.monotonic() + max(0.0, float(seconds))
+    while True:
+        if _stop_requested(stop_event):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return False
+        await asyncio.sleep(min(remaining, .03))
 
 
 async def play_plan_intiface(
@@ -146,11 +170,18 @@ async def play_plan_intiface(
             if device is None:
                 raise RuntimeError(f"Intiface device {device_index} not found")
 
+        if _stop_requested(stop_event):
+            await device.stop()
+            return
+
         frames = [frame for frame in intiface_frames(plan) if frame[0] >= float(start_at)]
         if not frames:
             return
 
         if soft_start_ms > 0:
+            if _stop_requested(stop_event):
+                await device.stop()
+                return
             _, _, start_position, _, _ = frames[0]
             if device.has_output(OutputType.POSITION_WITH_DURATION):
                 await device.run_output(
@@ -164,21 +195,23 @@ async def play_plan_intiface(
                 await device.run_output(DeviceOutputCommand(OutputType.VIBRATE, 0.0))
             if device.has_output(OutputType.ROTATE):
                 await device.run_output(DeviceOutputCommand(OutputType.ROTATE, 0.0))
-            await asyncio.sleep(soft_start_ms / 1000.0)
+            if await _interruptible_wait(soft_start_ms / 1000.0, stop_event):
+                await device.stop()
+                return
 
         base = time.monotonic() - float(start_at) / speed
         for at, duration_ms, position, intensity, rotation in frames:
-            if stop_event is not None and stop_event.is_set():
+            if _stop_requested(stop_event):
                 break
             target = base + at / speed
             while True:
                 remaining = target - time.monotonic()
                 if remaining <= 0:
                     break
-                if stop_event is not None and stop_event.is_set():
+                if _stop_requested(stop_event):
                     break
                 await asyncio.sleep(min(remaining, .03))
-            if stop_event is not None and stop_event.is_set():
+            if _stop_requested(stop_event):
                 break
             if device.has_output(OutputType.POSITION_WITH_DURATION):
                 await device.run_output(

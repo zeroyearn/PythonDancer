@@ -47,8 +47,6 @@ def test_plan_multiaxis_has_six_distinct_bounded_axes():
         assert times == sorted(times)
         assert np.all(np.isfinite(positions))
         assert np.all((positions >= 0.0) & (positions <= 100.0))
-    # 2.6 secondary axes may have different keyframe clocks, so compare them on
-    # a common preview grid rather than requiring equal-length arrays.
     duration = max(plan[axis][-1][0] for axis in AXIS_ORDER if plan[axis])
     grid = np.linspace(0.0, duration, 64)
     l1 = _sample(plan["L1"], grid)
@@ -86,5 +84,5 @@ def test_standard_bundle_paths_and_export(tmp_path):
 
     manifest = json.loads(written["manifest"].read_text(encoding="utf8"))
     assert set(manifest["axes"]) == set(AXIS_ORDER)
-    assert manifest["version"] == "1.4"
+    assert manifest["version"] == "1.5"
     assert manifest["metadata"]["choreography_sections"] == "intro:0-8"
