@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from math import isfinite
+from typing import Callable, Mapping, Sequence
 
 from .candidates import CandidateResult
 from .multiaxis import AXIS_ORDER
@@ -101,12 +102,21 @@ def compose_candidates(
     return output, choices
 
 
-def auto_assign_by_section_scores(candidates: Sequence[CandidateResult], sections: Sequence) -> CandidateComposition:
-    """Create a manual-editable composition from existing per-candidate windows.
+def auto_assign_by_section_scores(
+    candidates: Sequence[CandidateResult],
+    sections: Sequence,
+    *,
+    score_section: Callable[[CandidateResult, float, float, int], float] | None = None,
+) -> CandidateComposition:
+    """Choose the best candidate independently for every section.
 
-    When exact section-window scores are not available, use the candidate's
-    overall score as a deterministic fallback. The GUI can then override any
-    section assignment before composing.
+    ``score_section`` is the authoritative 2.8 path: callers pass a scorer that
+    evaluates each candidate's *effective* DAW output for the exact section.
+    This keeps Automation, Style Morphing, workspace shaping and mechanical
+    constraints inside the same truth used by candidate ranking and export.
+
+    The legacy weak-window/overall heuristic remains only as a deterministic
+    compatibility fallback for non-DAW callers that do not provide a scorer.
     """
     if not candidates:
         return CandidateComposition()
@@ -116,14 +126,20 @@ def auto_assign_by_section_scores(candidates: Sequence[CandidateResult], section
         best = None
         best_score = float("-inf")
         for candidate in candidates:
-            window_score = None
-            for window in getattr(candidate.quality, "weak_ranges", ()) or ():
-                if float(getattr(window, "start", -1)) <= start and float(getattr(window, "end", -1)) >= end:
-                    window_score = float(getattr(window, "score", candidate.quality.overall))
-                    break
-            score = float(candidate.quality.overall if window_score is None else window_score)
+            if score_section is not None:
+                score = float(score_section(candidate, start, end, index))
+                if not isfinite(score):
+                    score = float("-inf")
+            else:
+                window_score = None
+                for window in getattr(candidate.quality, "weak_ranges", ()) or ():
+                    if float(getattr(window, "start", -1)) <= start and float(getattr(window, "end", -1)) >= end:
+                        window_score = float(getattr(window, "score", candidate.quality.overall))
+                        break
+                score = float(candidate.quality.overall if window_score is None else window_score)
             if best is None or score > best_score or (score == best_score and candidate.name < best.name):
                 best = candidate
                 best_score = score
-        assignments[index] = best.name
+        if best is not None:
+            assignments[index] = best.name
     return CandidateComposition(assignments)
