@@ -1,9 +1,10 @@
+import inspect
 from types import SimpleNamespace
 
 import pytest
 
 from dancer.automation import AutomationSet, StyleKeyframe, StyleMorphTimeline
-from dancer.candidate_composer import CandidateComposition, compose_candidates
+from dancer.candidate_composer import CandidateComposition, auto_assign_by_section_scores, compose_candidates
 from dancer.daw_transform import apply_daw_transform
 from dancer.device_twin import DeviceTwinProfile
 from dancer.intent import MotionIntent
@@ -70,6 +71,42 @@ def test_candidate_composer_uses_raw_plans_and_preserves_locked_axis():
     assert choices == {1: "B"}
     assert merged["L0"] == base["L0"]
     assert merged["R0"] != base["R0"]
+
+
+def test_candidate_composer_auto_assign_uses_exact_section_scorer():
+    candidate_a = SimpleNamespace(name="A", quality=SimpleNamespace(overall=99.0, weak_ranges=()))
+    candidate_b = SimpleNamespace(name="B", quality=SimpleNamespace(overall=10.0, weak_ranges=()))
+    sections = [
+        SimpleNamespace(start=0.0, end=1.0, label="verse"),
+        SimpleNamespace(start=1.0, end=2.0, label="drop"),
+    ]
+    exact = {
+        ("A", 0): 94.0,
+        ("B", 0): 72.0,
+        ("A", 1): 38.0,
+        ("B", 1): 91.0,
+    }
+
+    composition = auto_assign_by_section_scores(
+        [candidate_a, candidate_b],
+        sections,
+        score_section=lambda candidate, _start, _end, index: exact[(candidate.name, index)],
+    )
+
+    # Overall score would choose A for both sections. Exact section scoring must
+    # independently choose B for the drop.
+    assert composition.assignments == {0: "A", 1: "B"}
+
+
+def test_auto_improvement_stale_context_includes_daw_state():
+    from dancer.workstation_ui_v27_async import MultiAxisWindow as AsyncWindow
+    from dancer.workstation_ui_v28 import MultiAxisWindow as DAWWindow
+
+    fingerprint_source = inspect.getsource(AsyncWindow._motion_state_fingerprint)
+    daw_context_source = inspect.getsource(DAWWindow._candidate_context)
+    assert "self._candidate_context()" in fingerprint_source
+    assert "self.automation.to_dict()" in daw_context_source
+    assert "self.style_morph.to_dict()" in daw_context_source
 
 
 def test_device_twin_round_trip_and_safe_pose():
