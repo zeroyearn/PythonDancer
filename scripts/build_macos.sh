@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-2.3.0}"
+if [[ $# -lt 1 || -z "${1:-}" ]]; then
+  echo "Usage: $0 <version> [arch]" >&2
+  exit 2
+fi
+
+VERSION="$1"
 ARCH="${2:-$(uname -m)}"
 PRODUCT="PythonDancer"
 BASENAME="${PRODUCT}-${VERSION}-macOS-${ARCH}"
 
-rm -rf build dist "${BASENAME}.zip" "${BASENAME}.dmg"
+rm -rf build dist "${BASENAME}.zip" "${BASENAME}.dmg" "${BASENAME}.sha256"
 
 python -m PyInstaller --clean --noconfirm macos.spec
 

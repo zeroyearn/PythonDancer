@@ -20,7 +20,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: python -m pip install -e '.[test]'
+        run: python -m pip install -e '.[test,intiface]'
       - name: Compile
         run: python -m compileall -q dancer tests
       - name: Test
@@ -36,7 +36,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: python -m pip install -e '.[build]'
+        run: python -m pip install -e '.[build,intiface]'
       - name: Build executable
         run: python builder.py
       - name: Archive production artifacts

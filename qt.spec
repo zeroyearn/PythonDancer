@@ -1,25 +1,37 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
 
 
 block_cipher = None
+
+hiddenimports = sorted(set(
+	collect_submodules("buttplug")
+	+ [
+		"librosa",
+		"librosa.feature",
+		"librosa.util",
+		"librosa.util.utils",
+		"librosa.feature.rhythm",
+		"librosa.beat",
+		"librosa.core",
+		"serial",
+		"serial.tools.list_ports",
+		"dancer.workstation_ui_v25",
+		"dancer.workstation_ui_v25_final",
+		"dancer.editing",
+		"dancer.safety",
+		"dancer.project",
+		"dancer.outputs",
+		"dancer.tcode_speed",
+	]
+))
 
 
 a = Analysis(
 	['ui_entry.py'],
 	pathex=[],
 	binaries=[],
-	hiddenimports=[
-		"librosa", 
-		"librosa.feature", 
-		"librosa.util", 
-		"librosa.util.utils", 
-		"librosa.feature", 
-		"librosa.feature.rhythm", 
-		"librosa.beat", 
-		"librosa.core",
-		"serial",
-		"serial.tools.list_ports",
-	],
+	hiddenimports=hiddenimports,
 	hookspath=["extra-hooks"],
 	hooksconfig={},
 	runtime_hooks=[],

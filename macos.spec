@@ -12,6 +12,7 @@ if not ffmpeg:
 
 hiddenimports = sorted(set(
     collect_submodules("librosa")
+    + collect_submodules("buttplug")
     + [
         "matplotlib.backends.backend_tkagg",
         "serial",
@@ -25,7 +26,14 @@ hiddenimports = sorted(set(
         "dancer.style",
         "dancer.stems",
         "dancer.tcode",
+        "dancer.tcode_speed",
         "dancer.runtime",
+        "dancer.workstation_ui_v25",
+        "dancer.workstation_ui_v25_final",
+        "dancer.editing",
+        "dancer.safety",
+        "dancer.project",
+        "dancer.outputs",
     ]
 ))
 
@@ -80,8 +88,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "PythonDancer",
         "CFBundleName": "PythonDancer",
-        "CFBundleShortVersionString": "2.3.0",
-        "CFBundleVersion": "2.3.0",
+        "CFBundleShortVersionString": "2.5.0",
+        "CFBundleVersion": "2.5.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "NSHumanReadableCopyright": "PythonDancer contributors",
