@@ -7,11 +7,14 @@ from threading import Thread
 from tkinter import messagebox, ttk
 
 from .automation import AutomationSet, StyleMorphTimeline
-from .candidate_composer import CandidateComposition
+from .candidate_composer import CandidateComposition, auto_assign_by_section_scores
+from .comparison import _slice_data
 from .daw_transform import apply_daw_transform
 from .device_twin import DeviceTwinProfile
 from .generation_limits import optimizer_from_calibration
 from .improvement import ImprovementConfig, auto_improve
+from .plan_window import slice_plan
+from .quality import score_plan
 from .workspace import copy_plan
 from .workspace_constraints import constrain_workspace_plan
 from .workstation_ui_v27_hotfix import _effective_output_snapshot
@@ -149,6 +152,78 @@ class MultiAxisWindow(_DAWWindow):
 
         self.quality_worker = Thread(target=work, daemon=True)
         self.quality_worker.start()
+
+    # ---------- section-aware Candidate Composer ----------
+    def _auto_assign_composer(self):
+        if not self.quality_candidates or not self.workspace or self.data is None:
+            return
+        if self.quality_worker and self.quality_worker.is_alive():
+            return
+        if self.worker and self.worker.is_alive():
+            messagebox.showwarning("PythonDancer", "Finish the current track generation before auto-assigning Candidate Composer.")
+            return
+
+        candidates = list(self.quality_candidates)
+        sections = deepcopy(self.workspace.sections)
+        data = self.data
+        geometry = self.sr6_geometry
+        mechanical = self._mechanical_config()
+        context = self._motion_state_fingerprint()
+        # Build each effective candidate once on the Tk thread. The heavier
+        # section-quality scoring then stays off the UI thread.
+        effective_plans = {
+            candidate.name: copy_plan(self._effective_candidate_plan(candidate))
+            for candidate in candidates
+        }
+        self.composer_summary_var.set("Candidate composition · scoring DAW output per section…")
+
+        def score_section(candidate, start, end, _index):
+            local = slice_plan(effective_plans[candidate.name], start, end, rebase=True)
+            local_data = _slice_data(data, start, end)
+            return score_plan(
+                local,
+                local_data,
+                geometry=geometry,
+                mechanical_config=mechanical,
+                compute_windows=False,
+            ).overall
+
+        def work():
+            try:
+                composition = auto_assign_by_section_scores(
+                    candidates,
+                    sections,
+                    score_section=score_section,
+                )
+                self.after(0, lambda: self._composer_auto_assign_done(context, composition))
+            except Exception as exc:
+                self.after(0, lambda e=exc: self._composer_auto_assign_failed(e))
+
+        self.quality_worker = Thread(target=work, daemon=True)
+        self.quality_worker.start()
+
+    def _composer_auto_assign_done(self, context, composition):
+        self.quality_worker = None
+        if getattr(self, "_closing", False):
+            return
+        if context != self._motion_state_fingerprint():
+            self.composer_summary_var.set("Candidate composition · discarded because the editor changed")
+            return
+        self._checkpoint()
+        self.candidate_composition = composition
+        self._refresh_composer()
+        self._mark_changed()
+        self.composer_summary_var.set(
+            "Candidate composition · "
+            + " | ".join(f"{index + 1}:{name}" for index, name in sorted(composition.assignments.items()))
+        )
+
+    def _composer_auto_assign_failed(self, exc):
+        self.quality_worker = None
+        if getattr(self, "_closing", False):
+            return
+        self.composer_summary_var.set(f"Candidate composition failed: {exc}")
+        messagebox.showerror("PythonDancer", str(exc))
 
     # ---------- transport mutual exclusion ----------
     def _live_running(self):
