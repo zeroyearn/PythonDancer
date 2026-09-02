@@ -23,12 +23,7 @@ def ffmpeg_conv(in_file, out_file):
 
 
 def cli_args():
-    parser = argparse.ArgumentParser(
-        prog="python-dancer",
-        description="Create single- or six-axis funscripts from audio using beat-aware choreography",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
+    parser = argparse.ArgumentParser(prog="python-dancer", description="Create single- or six-axis funscripts from audio using beat-aware choreography", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio_path", nargs="?", default=None, help="Path to input media")
     parser.add_argument("--out_path", help="Path to export funscript or multi-axis bundle prefix")
     parser.add_argument("--csv", help="Export as CSV instead of funscript (single-axis only)", action="store_true")
@@ -55,14 +50,30 @@ def cli_args():
     multi.add_argument("--bars_per_phrase", type=int, default=4, metavar="N", help="Bars in the long phrase phase")
     multi.add_argument("--section_bars", type=int, default=4, metavar="N", help="Phrase-aligned bars per section-analysis window")
     multi.add_argument("--show_sections", action="store_true", help="Print detected intro/verse/build/chorus/drop/breakdown/outro sections")
+    multi.add_argument("--show_intent", action="store_true", help="Print the inferred continuous Motion Intent")
     multi.add_argument("--profile", help="Load a choreography profile JSON")
-    multi.add_argument("--reference_bundle", help="Learn style from an existing multi-axis funscript bundle prefix")
-    multi.add_argument("--save_learned_profile", help="Save the profile learned from --reference_bundle as JSON")
+    multi.add_argument("--reference_bundle", help="Learn style from one existing multi-axis funscript bundle prefix")
+    multi.add_argument("--reference_library", nargs="+", metavar="BUNDLE", help="Learn one profile from multiple reference bundle prefixes")
+    multi.add_argument("--reference_weights", nargs="+", type=float, metavar="W", help="Optional weights for --reference_library")
+    multi.add_argument("--style_clusters", type=int, default=0, metavar="N", help="Cluster reference-library styles and print cluster summaries")
+    multi.add_argument("--save_learned_profile", help="Save the learned profile as JSON")
     multi.add_argument("--profile_name", help="Optional name for a learned reference profile")
     multi.add_argument("--stems", choices=("off", "auto", "required"), default="off", help="Separated-stem enrichment mode")
     multi.add_argument("--stem_dir", help="Directory containing drums/bass/vocals/other stem files")
     multi.add_argument("--stem_cache", default=".dancer_stems", help="Cache/output directory for optional Demucs separation")
     multi.add_argument("--demucs_model", default="htdemucs", help="Demucs model name when stem separation is available")
+    multi.add_argument("--independent_axes", "--independent-axes", dest="independent_axes", action="store_true", default=True, help="Give L1/L2/R0/R1/R2 independent musical event timelines")
+    multi.add_argument("--no_independent_axes", "--no-independent-axes", dest="independent_axes", action="store_false", help="Reuse L0 timestamps for secondary axes")
+    multi.add_argument("--axis_density", type=float, default=1.0, metavar="[0+]", help="Independent-axis event density multiplier")
+    multi.add_argument("--axis_accent_threshold", type=float, default=.62, metavar="[0-1]", help="Stem/feature threshold for extra independent-axis subdivisions")
+    multi.add_argument("--motion_optimizer", "--motion-optimizer", dest="motion_optimizer", action="store_true", default=True, help="Enable cross-axis pose/velocity/jerk optimization")
+    multi.add_argument("--no_motion_optimizer", "--no-motion-optimizer", dest="motion_optimizer", action="store_false", help="Disable the 2.6 cross-axis optimizer")
+    multi.add_argument("--pose_budget", type=float, default=1.85, metavar="[0+]", help="Maximum normalized simultaneous 6D pose load")
+    multi.add_argument("--velocity_budget", type=float, default=2.25, metavar="[0+]", help="Maximum normalized simultaneous six-axis velocity load")
+    multi.add_argument("--optimizer_iterations", type=int, default=3, metavar="N", help="Projection passes for cross-axis/jerk optimization")
+    multi.add_argument("--intent_override_amount", type=float, default=0.0, metavar="[0-1]", help="Blend inferred Motion Intent toward manual intent values")
+    for name in ("intensity", "aggression", "flow", "complexity", "symmetry", "rotation_bias", "translation_bias", "accent_density"):
+        multi.add_argument(f"--intent_{name}", type=float, default=.5, metavar="[0-1]", help=f"Manual Motion Intent value: {name.replace('_', ' ')}")
     multi.add_argument("--no_manifest", action="store_true", help="Do not write the .motion.json bundle manifest")
 
     tcode = parser.add_argument_group("TCode v0.3 device output")
@@ -79,20 +90,23 @@ def cli_args():
     tcode.add_argument("--device_info", action="store_true", help="Query D0/D1/D2 from --serial_port and exit")
     tcode.add_argument("--list_ports", action="store_true", help="List serial ports and exit")
 
-    output = parser.add_argument_group("Intiface / playback safety")
-    output.add_argument("--intiface", action="store_true", help="Play the generated six-axis motion through Intiface Central / Buttplug")
+    output = parser.add_argument_group("device timing / Intiface / playback safety")
+    output.add_argument("--intiface", action="store_true", help="Play generated six-axis motion through Intiface Central / Buttplug")
     output.add_argument("--intiface_address", default="ws://127.0.0.1:12345", help="Intiface Central WebSocket address")
     output.add_argument("--intiface_device", type=int, help="Optional Intiface device index; the first device is used when omitted")
     output.add_argument("--soft_start_ms", type=int, default=750, metavar="MS", help="Ramp time used to enter the selected live-playback start pose")
     output.add_argument("--auto_home", "--auto-home", dest="auto_home", action="store_true", default=True, help="Return live device playback to neutral after natural completion")
     output.add_argument("--no_auto_home", "--no-auto-home", dest="auto_home", action="store_false", help="Disable the live neutral return after natural completion")
     output.add_argument("--home_ms", type=int, default=700, metavar="MS", help="Auto Home neutral-return duration")
+    output.add_argument("--latency_ms", type=float, default=0.0, metavar="MS", help="Known output latency; commands are scheduled this much earlier")
+    output.add_argument("--manual_offset_ms", type=float, default=0.0, metavar="MS", help="Additional manual timing compensation")
+    output.add_argument("--measure_latency", action="store_true", help="Estimate serial query RTT before playback and use half RTT as latency")
+    output.add_argument("--calibration_profile", help="Load a JSON device calibration profile")
 
     parser.add_argument("--auto_pitch", type=float, default=50.0, metavar="[0-100]", help="Target average position")
     parser.add_argument("--auto_speed", type=float, default=250.0, metavar="[0+]", help="Target action speed in units/s")
     parser.add_argument("--auto_per", type=float, default=65.0, metavar="[0-100]", help="Target percent of actions above target speed")
     parser.add_argument("--auto_mod", type=int, default=2, choices=(1, 2, 3), help="Optimizer objective: mean speed, high-speed share, or travel length")
-
     parser.add_argument("--pitch", type=float, default=100.0, metavar="[-200-200]", help="Pitch-to-center range")
     parser.add_argument("--energy", type=float, default=1.0, metavar="[0+]", help="Energy-to-range multiplier")
     parser.add_argument("--amplitude_centering", type=float, default=0.0, metavar="[-200-200]", help="Energy-based center shift")

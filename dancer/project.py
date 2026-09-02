@@ -13,7 +13,7 @@ from typing import Any, Mapping
 from .multiaxis import AXIS_ORDER
 from .workspace import AxisControl, GestureBlock, SectionBlock, TimeRange, WorkspaceState, copy_plan
 
-PROJECT_SCHEMA = 1
+PROJECT_SCHEMA = 2
 APP_DIR = Path.home() / ".pythondancer"
 AUTOSAVE_DIR = APP_DIR / "autosave"
 RECENT_FILE = APP_DIR / "recent.json"
@@ -29,7 +29,18 @@ def _workspace_from_dict(data: Mapping[str, Any]) -> WorkspaceState:
     ws.selection = TimeRange(float(selection.get("start", 0.0)), float(selection.get("end", 0.0)))
     ws.sections = [SectionBlock(float(item["start"]), float(item["end"]), str(item["label"])) for item in data.get("sections", [])]
     ws.gestures = [
-        GestureBlock(float(item["start"]), float(item["end"]), str(item["gesture"]), float(item.get("strength", 1.0)))
+        GestureBlock(
+            float(item["start"]),
+            float(item["end"]),
+            str(item["gesture"]),
+            float(item.get("strength", 1.0)),
+            axis_mix=dict(item.get("axis_mix") or {}),
+            phase_offset=float(item.get("phase_offset", 0.0)),
+            cycles=float(item.get("cycles", 1.0)),
+            direction=int(item.get("direction", 1)),
+            blend_in=float(item.get("blend_in", 0.12)),
+            blend_out=float(item.get("blend_out", 0.12)),
+        )
         for item in data.get("gestures", [])
     ]
     axis_data = data.get("axes") or {}
@@ -75,7 +86,7 @@ class ProjectDocument:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ProjectDocument":
         schema = int(data.get("schema", 0))
-        if schema != PROJECT_SCHEMA:
+        if schema not in (1, PROJECT_SCHEMA):
             raise ValueError(f"unsupported .pdance schema: {schema}")
         plan = {
             axis: [(float(item[0]), float(item[1])) for item in (data.get("base_plan") or {}).get(axis, [])]

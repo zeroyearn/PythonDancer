@@ -1,8 +1,9 @@
-"""Optional stem separation and beat-aligned stem feature enrichment.
+"""Optional stem separation and beat-aligned source features.
 
-Demucs is deliberately optional. PythonDancer remains lightweight by default:
-users may provide an existing stem directory, let PythonDancer invoke an
-installed Demucs package/executable, or keep stem analysis disabled.
+Demucs remains optional. PythonDancer can consume an existing four-stem folder,
+invoke an installed Demucs backend, or fall back to mixed-audio features. 2.6
+adds rhythm-band proxies (kick/snare/hi-hat), bass onset, vocal pitch motion and
+other-stem spectral motion so different axes can use different event clocks.
 """
 from __future__ import annotations
 
@@ -110,6 +111,29 @@ def _weighted_pitch(y: np.ndarray, sr: int, hop_length: int) -> np.ndarray:
     return np.log10(np.maximum(weighted, 0.01))
 
 
+def _spectral_band_envelope(y: np.ndarray, sr: int, hop_length: int, low: float, high: float | None) -> np.ndarray:
+    import librosa
+
+    spectrum = np.abs(librosa.stft(y=y, hop_length=hop_length))
+    frequencies = librosa.fft_frequencies(sr=sr)
+    mask = frequencies >= float(low)
+    if high is not None:
+        mask &= frequencies < float(high)
+    if not np.any(mask):
+        return np.zeros(spectrum.shape[1], dtype=np.float64)
+    return np.mean(spectrum[mask], axis=0)
+
+
+def _confidence(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=np.float64).reshape(-1)
+    finite = values[np.isfinite(values)]
+    if finite.size < 3:
+        return 0.0
+    spread = float(np.std(finite))
+    magnitude = float(np.mean(np.abs(finite)))
+    return float(np.clip(spread / max(magnitude, 1e-8), 0.0, 1.0))
+
+
 def extract_stem_features(stem_files: Mapping[str, str | Path], beat_times, *, hop_length: int = 512) -> dict[str, np.ndarray]:
     """Extract compact beat-aligned features from separated source stems."""
     import librosa
@@ -126,12 +150,28 @@ def extract_stem_features(stem_files: Mapping[str, str | Path], beat_times, *, h
             continue
         rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
         output[f"stem_{stem}_energy"] = _aggregate_to_beats(rms, sr, hop_length, beats)
+
         if stem == "drums":
             onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
             output["stem_drums_onset"] = _aggregate_to_beats(onset, sr, hop_length, beats)
+            output["stem_drums_kick"] = _aggregate_to_beats(_spectral_band_envelope(y, sr, hop_length, 25., 180.), sr, hop_length, beats)
+            output["stem_drums_snare"] = _aggregate_to_beats(_spectral_band_envelope(y, sr, hop_length, 180., 3500.), sr, hop_length, beats)
+            output["stem_drums_hihat"] = _aggregate_to_beats(_spectral_band_envelope(y, sr, hop_length, 5000., None), sr, hop_length, beats)
+        elif stem == "bass":
+            onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+            output["stem_bass_onset"] = _aggregate_to_beats(onset, sr, hop_length, beats)
+            output["stem_bass_low"] = _aggregate_to_beats(_spectral_band_envelope(y, sr, hop_length, 25., 220.), sr, hop_length, beats)
         elif stem == "vocals":
             pitch = _weighted_pitch(y, sr, hop_length)
-            output["stem_vocals_pitch"] = _aggregate_to_beats(pitch, sr, hop_length, beats)
+            beat_pitch = _aggregate_to_beats(pitch, sr, hop_length, beats)
+            output["stem_vocals_pitch"] = beat_pitch
+            movement = np.zeros_like(beat_pitch)
+            if beat_pitch.size > 1:
+                movement[1:] = np.abs(np.diff(beat_pitch))
+            output["stem_vocals_pitch_motion"] = movement
+        elif stem == "other":
+            centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop_length)[0]
+            output["stem_other_centroid"] = _aggregate_to_beats(centroid, sr, hop_length, beats)
     return output
 
 
@@ -179,11 +219,14 @@ def enrich_with_stems(
 
     features = extract_stem_features(files, result.get("beats", []))
     result.update(features)
+    confidence = {name: _confidence(values) for name, values in features.items()}
     result["stem_analysis"] = {
         "status": "ready",
         "source": source_kind or "provided",
         "model": model if source_kind == "demucs" else None,
         "files": {stem: str(path) for stem, path in files.items()},
         "features": sorted(features),
+        "confidence": confidence,
+        "mean_confidence": float(np.mean(list(confidence.values()))) if confidence else 0.0,
     }
     return result

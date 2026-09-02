@@ -1,7 +1,7 @@
 """SR6/OSR6-style six-axis motion planning and funscript bundle export."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from json import dump
 from pathlib import Path
 from typing import Mapping
@@ -11,7 +11,10 @@ import numpy as np
 from .choreography import ChoreographyAnalysis, detect_sections
 from .choreo_profile import synthesize_profiled_choreography
 from .features import safe_normalize
+from .independent_planner import IndependentAxisConfig, plan_independent_secondary_axes
+from .intent import IntentEnvelope, infer_motion_intent
 from .motion import MotionConfig, apply_constraints, plan_motion
+from .optimizer import OptimizerConfig, optimize_multiaxis
 from .style import ChoreographyProfile
 
 AXIS_ORDER = ("L0", "L1", "L2", "R0", "R1", "R2")
@@ -45,6 +48,8 @@ class MultiAxisConfig:
     bars_per_phrase: int = 4
     section_bars: int = 4
     profile: ChoreographyProfile | None = None
+    independent: IndependentAxisConfig = field(default_factory=IndependentAxisConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
 
     def __post_init__(self):
         if self.preset not in _PRESET_AMPLITUDES:
@@ -61,6 +66,10 @@ class MultiAxisConfig:
             raise ValueError("musical grid values must be positive")
         if self.profile is not None and not isinstance(self.profile, ChoreographyProfile):
             raise TypeError("profile must be a ChoreographyProfile")
+        if not isinstance(self.independent, IndependentAxisConfig):
+            raise TypeError("independent must be an IndependentAxisConfig")
+        if not isinstance(self.optimizer, OptimizerConfig):
+            raise TypeError("optimizer must be an OptimizerConfig")
 
 
 def _feature(data: Mapping, name: str, length: int, fallback: str | None = None) -> np.ndarray:
@@ -143,6 +152,10 @@ def analyze_multiaxis(data: Mapping, config: MultiAxisConfig) -> ChoreographyAna
     return detect_sections(data, beats_per_bar=config.beats_per_bar, bars_per_phrase=config.bars_per_phrase, section_bars=config.section_bars)
 
 
+def analyze_intent(data: Mapping, config: MultiAxisConfig) -> IntentEnvelope:
+    return infer_motion_intent(data, analyze_multiaxis(data, config))
+
+
 def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np.ndarray, config: MultiAxisConfig) -> dict[str, np.ndarray]:
     if config.mode == "choreography":
         signals, _ = synthesize_profiled_choreography(
@@ -172,18 +185,53 @@ def _secondary_targets(data: Mapping, action_times: np.ndarray, l0_positions: np
     }
 
 
+def _section_times(data: Mapping, analysis: ChoreographyAnalysis) -> list[float]:
+    beats = np.asarray(data.get("beats", []), dtype=np.float64).reshape(-1)
+    values: list[float] = []
+    for section in analysis.sections:
+        if 0 <= section.start_beat < beats.size:
+            values.append(float(beats[section.start_beat]))
+        if 0 <= section.end_beat < beats.size:
+            values.append(float(beats[section.end_beat]))
+    return values
+
+
 def plan_multiaxis(data: Mapping, config: MultiAxisConfig) -> dict[str, list[tuple[float, float]]]:
     l0 = plan_motion(dict(data), config.motion)
     if not l0:
         return {axis: [] for axis in AXIS_ORDER}
-    action_times = np.asarray([at for at, _ in l0], dtype=np.float64)
-    l0_positions = np.asarray([pos for _, pos in l0], dtype=np.float64)
-    targets = _secondary_targets(data, action_times, l0_positions, config)
+
     axes: dict[str, list[tuple[float, float]]] = {"L0": l0}
-    for axis in AXIS_ORDER[1:]:
-        speed_limit, acceleration_limit = SECONDARY_LIMITS[axis]
-        axes[axis] = apply_constraints(zip(action_times, targets[axis]), max_speed=speed_limit, max_acceleration=acceleration_limit, min_interval=config.motion.min_interval)
-    return axes
+    if config.mode == "choreography" and config.independent.enabled:
+        analysis = analyze_multiaxis(data, config)
+        intent = infer_motion_intent(data, analysis)
+        axes.update(plan_independent_secondary_axes(
+            data,
+            l0,
+            preset=config.preset,
+            amplitudes=_PRESET_AMPLITUDES[config.preset],
+            strength=config.strength,
+            neutral=config.neutral,
+            gesture_strength=config.gesture_strength,
+            beats_per_bar=config.beats_per_bar,
+            bars_per_phrase=config.bars_per_phrase,
+            section_bars=config.section_bars,
+            profile=config.profile,
+            intent=intent,
+            axis_config=config.independent,
+            limits=SECONDARY_LIMITS,
+            section_times=_section_times(data, analysis),
+        ))
+    else:
+        action_times = np.asarray([at for at, _ in l0], dtype=np.float64)
+        l0_positions = np.asarray([pos for _, pos in l0], dtype=np.float64)
+        targets = _secondary_targets(data, action_times, l0_positions, config)
+        for axis in AXIS_ORDER[1:]:
+            speed_limit, acceleration_limit = SECONDARY_LIMITS[axis]
+            axes[axis] = apply_constraints(zip(action_times, targets[axis]), max_speed=speed_limit, max_acceleration=acceleration_limit, min_interval=config.motion.min_interval)
+
+    optimizer = replace(config.optimizer, neutral=float(config.neutral))
+    return optimize_multiaxis(axes, optimizer)
 
 
 def validate_multiaxis(plan: Mapping[str, list[tuple[float, float]]]) -> None:
@@ -244,7 +292,7 @@ def export_funscript_bundle(base_path: str | Path, plan: Mapping[str, list[tuple
         l0_path = paths["L0"]
         manifest_path = l0_path.with_suffix(".motion.json")
         payload = {
-            "version": "1.3",
+            "version": "1.4",
             "metadata": dict(metadata or {}),
             "axes": {
                 axis: {"channel": AXIS_CHANNELS[axis], "description": AXIS_DESCRIPTIONS[axis], "file": paths[axis].name, "actions": len(plan[axis])}

@@ -15,10 +15,14 @@ hiddenimports = sorted(set(
     + collect_submodules("buttplug")
     + [
         "matplotlib.backends.backend_tkagg",
+        "mpl_toolkits.mplot3d",
         "serial",
         "serial.tools.list_ports",
         "serial.tools.list_ports_osx",
         "dancer.cli",
+        "dancer.cli_v26",
+        "dancer.cli_v26_final",
+        "dancer.cli_v26_release",
         "dancer.ui",
         "dancer.multiaxis_ui",
         "dancer.choreography",
@@ -30,15 +34,27 @@ hiddenimports = sorted(set(
         "dancer.runtime",
         "dancer.workstation_ui_v25",
         "dancer.workstation_ui_v25_final",
+        "dancer.workstation_ui_v26",
+        "dancer.workstation_ui_v26_final",
+        "dancer.workstation_ui_v26_release",
         "dancer.editing",
         "dancer.safety",
         "dancer.project",
         "dancer.outputs",
+        "dancer.intent",
+        "dancer.independent_planner",
+        "dancer.optimizer",
+        "dancer.reference_library",
+        "dancer.latency",
+        "dancer.calibration",
+        "dancer.generation_limits",
+        "dancer.kinematics",
+        "dancer.geometry_profile",
+        "dancer.i18n",
+        "dancer.i18n_safe",
     ]
 ))
 
-# FFmpeg is intentionally bundled. PyInstaller analyzes the Homebrew binary and
-# collects its non-system dylib dependencies into the app bundle.
 a = Analysis(
     [str(project_root / "macos_entry.py")],
     pathex=[str(project_root)],
@@ -71,14 +87,7 @@ exe = EXE(
     entitlements_file=None,
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="PythonDancer",
-)
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="PythonDancer")
 
 app = BUNDLE(
     coll,
@@ -88,8 +97,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "PythonDancer",
         "CFBundleName": "PythonDancer",
-        "CFBundleShortVersionString": "2.5.0",
-        "CFBundleVersion": "2.5.0",
+        "CFBundleShortVersionString": "2.6.0",
+        "CFBundleVersion": "2.6.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "NSHumanReadableCopyright": "PythonDancer contributors",
