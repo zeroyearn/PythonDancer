@@ -155,7 +155,7 @@ class MultiAxisWindow(_DAWWindow):
 
     # ---------- section-aware Candidate Composer ----------
     def _auto_assign_composer(self):
-        if not self.quality_candidates or not self.workspace or self.data is None:
+        if not self.quality_candidates or not self.workspace or self.data is None or self.base_plan is None:
             return
         if self.quality_worker and self.quality_worker.is_alive():
             return
@@ -168,28 +168,50 @@ class MultiAxisWindow(_DAWWindow):
         data = self.data
         geometry = self.sr6_geometry
         mechanical = self._mechanical_config()
+        base = copy_plan(self.base_plan)
+        workspace = deepcopy(self.workspace)
+        curves = deepcopy(self.curve_settings)
+        safety = deepcopy(self.safety_settings)
+        automation = deepcopy(self.automation)
+        styles = deepcopy(self.style_morph)
         context = self._motion_state_fingerprint()
-        # Build each effective candidate once on the Tk thread. The heavier
-        # section-quality scoring then stays off the UI thread.
-        effective_plans = {
-            candidate.name: copy_plan(self._effective_candidate_plan(candidate))
-            for candidate in candidates
-        }
         self.composer_summary_var.set("Candidate composition · scoring DAW output per section…")
 
-        def score_section(candidate, start, end, _index):
-            local = slice_plan(effective_plans[candidate.name], start, end, rebase=True)
-            local_data = _slice_data(data, start, end)
-            return score_plan(
-                local,
-                local_data,
-                geometry=geometry,
-                mechanical_config=mechanical,
-                compute_windows=False,
-            ).overall
+        def effective_candidate(candidate):
+            config = replace(candidate.config, mechanical=mechanical, geometry=geometry)
+            output = _effective_output_snapshot(
+                candidate.plan,
+                config,
+                base_plan=base,
+                workspace=workspace,
+                curve_settings=curves,
+                safety_settings=safety,
+                data=data,
+            )
+            output = apply_daw_transform(output, automation, styles)
+            return constrain_workspace_plan(output, config)
 
         def work():
             try:
+                # Mechanical projection and all DAW/workspace shaping stay off
+                # the Tk thread. Each full effective candidate is calculated
+                # exactly once, then sliced for section-level scoring.
+                effective_plans = {
+                    candidate.name: effective_candidate(candidate)
+                    for candidate in candidates
+                }
+
+                def score_section(candidate, start, end, _index):
+                    local = slice_plan(effective_plans[candidate.name], start, end, rebase=True)
+                    local_data = _slice_data(data, start, end)
+                    return score_plan(
+                        local,
+                        local_data,
+                        geometry=geometry,
+                        mechanical_config=mechanical,
+                        compute_windows=False,
+                    ).overall
+
                 composition = auto_assign_by_section_scores(
                     candidates,
                     sections,
