@@ -28,6 +28,25 @@ class ControlMapping:
         return float(self.minimum + alpha * (self.maximum - self.minimum))
 
 
+DEFAULT_CONTROL_MAPPINGS = (
+    ControlMapping("midi", "cc1", "energy", .35, 1.50),
+    ControlMapping("midi", "cc2", "stroke_depth", .35, 1.50),
+    ControlMapping("midi", "cc3", "rotation_mix", .0, 1.50),
+    ControlMapping("midi", "cc4", "complexity", .0, 1.0),
+    ControlMapping("midi", "cc5", "gesture_density", .25, 2.0),
+    ControlMapping("midi", "cc6", "smoothing", .0, .95),
+    ControlMapping("midi", "cc7", "safety_aggressiveness", .0, 1.0),
+    ControlMapping("osc", "/pythondancer/energy", "energy", .35, 1.50),
+    ControlMapping("osc", "/pythondancer/stroke", "stroke_depth", .35, 1.50),
+    ControlMapping("osc", "/pythondancer/rotation", "rotation_mix", .0, 1.50),
+    ControlMapping("osc", "/pythondancer/complexity", "complexity", .0, 1.0),
+    ControlMapping("osc", "/pythondancer/density", "gesture_density", .25, 2.0),
+    ControlMapping("osc", "/pythondancer/smoothing", "smoothing", .0, .95),
+    ControlMapping("osc", "/pythondancer/safety", "safety_aggressiveness", .0, 1.0),
+    ControlMapping("osc", "/pythondancer/bpm", "bpm", 30.0, 300.0),
+)
+
+
 @dataclass
 class ControlState:
     values: dict[str, float] = field(default_factory=dict)
@@ -54,7 +73,7 @@ class ControlState:
 
 class MidiControlBridge:
     def __init__(self, mappings=(), *, input_name: str | None = None, on_change: Callable[[str, float], None] | None = None):
-        self.mappings = tuple(mappings)
+        self.mappings = tuple(mappings) or DEFAULT_CONTROL_MAPPINGS
         self.input_name = input_name
         self.on_change = on_change
         self.state = ControlState()
@@ -104,7 +123,7 @@ class MidiControlBridge:
 
 class OSCControlBridge:
     def __init__(self, mappings=(), *, host="127.0.0.1", port=9000, on_change: Callable[[str, float], None] | None = None):
-        self.mappings = tuple(mappings)
+        self.mappings = tuple(mappings) or DEFAULT_CONTROL_MAPPINGS
         self.host = host
         self.port = int(port)
         self.on_change = on_change
@@ -164,14 +183,12 @@ class LinkClock:
 
     def connect(self):
         backend = None
-        errors = []
         for module_name in ("link", "aalink"):
             try:
-                module = __import__(module_name)
-                backend = module
+                backend = __import__(module_name)
                 break
-            except Exception as exc:
-                errors.append(str(exc))
+            except Exception:
+                pass
         self._backend = backend
         return self
 
@@ -199,4 +216,5 @@ class LinkClock:
 
 def mappings_from_dict(payload: Mapping | None):
     payload = payload or {}
-    return tuple(ControlMapping(**item) for item in payload.get("mappings", ()))
+    values = tuple(ControlMapping(**item) for item in payload.get("mappings", ()))
+    return values or DEFAULT_CONTROL_MAPPINGS
