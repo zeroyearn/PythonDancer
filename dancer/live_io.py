@@ -6,8 +6,15 @@ from threading import Event, Thread
 from time import monotonic
 from typing import Callable
 
+import numpy as np
+
 from .live import LiveChoreographyEngine, StreamingAudioFeatures
 from .tcode import SerialTCodeDevice, encode_axis
+
+
+AXES = ("L0", "L1", "L2", "R0", "R1", "R2")
+ROTATION_AXES = {"R0", "R1", "R2"}
+SECONDARY_AXES = {"L1", "L2", "R1", "R2"}
 
 
 def list_audio_devices():
@@ -29,8 +36,6 @@ def list_audio_devices():
 
 
 class SoundDeviceLiveSource:
-    """Capture mono audio and emit fixed-size numpy blocks through a queue."""
-
     def __init__(self, *, device=None, samplerate: int = 48000, blocksize: int = 1024):
         self.device = device
         self.samplerate = int(samplerate)
@@ -82,8 +87,6 @@ class SoundDeviceLiveSource:
 
 
 class TCodeLiveSink:
-    """Persistent serial sink for one predictive pose at a time."""
-
     def __init__(self, port: str, *, baud: int = 115200, timeout: float = .25, interval_ms: int = 80):
         self.port = port
         self.baud = int(baud)
@@ -106,7 +109,7 @@ class TCodeLiveSink:
             raise RuntimeError("live TCode sink is not open")
         duration = self.interval_ms if interval_ms is None else max(20, int(interval_ms))
         commands = []
-        for axis in ("L0", "L1", "L2", "R0", "R1", "R2"):
+        for axis in AXES:
             axis_range = None
             if self.profile is not None and self.profile.axes:
                 if axis not in self.profile.axes:
@@ -126,11 +129,13 @@ class TCodeLiveSink:
 
 
 class LiveSession:
-    """Background live audio -> features -> planner -> optional hardware sink.
+    """Background live audio -> planner -> control surfaces -> safety -> sink.
 
-    ``control_state`` may return an object/dict containing ``bpm`` and
-    ``beat_phase`` (for MIDI/OSC/Link transport). The callback is sampled once
-    per audio block, allowing tempo/phase changes without restarting Live mode.
+    ``control_state`` may return an object/dict with BPM/beat phase and optional
+    live controls such as energy, stroke_depth, rotation_mix, complexity,
+    gesture_density, smoothing and safety_aggressiveness. Control shaping always
+    happens before ``pose_transform`` so Device Twin safe-pose projection remains
+    authoritative for hardware output.
     """
 
     def __init__(
@@ -155,32 +160,79 @@ class LiveSession:
         self.worker: Thread | None = None
         self.extractor = StreamingAudioFeatures(source.samplerate)
         self._phase_anchor = monotonic()
+        self._last_control_pose = None
 
-    def _transport(self, timestamp: float):
+    def _control_snapshot(self):
+        if self.control_state is None:
+            return None
+        try:
+            return self.control_state()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _state_value(state, name, default=None):
+        if state is None:
+            return default
+        if isinstance(state, dict):
+            values = state.get("values") or {}
+            return values.get(name, state.get(name, default))
+        values = getattr(state, "values", {}) or {}
+        return values.get(name, getattr(state, name, default))
+
+    def _transport(self, timestamp: float, state=None):
         bpm = self.bpm
         phase = None
-        if self.control_state is not None:
-            try:
-                state = self.control_state()
-                if isinstance(state, dict):
-                    bpm = float(state.get("bpm", bpm))
-                    phase = state.get("beat_phase")
-                else:
-                    bpm = float(getattr(state, "bpm", bpm))
-                    phase = getattr(state, "beat_phase", None)
-                if bpm > 1e-6:
-                    self.bpm = bpm
-            except Exception:
-                phase = None
+        if state is not None:
+            bpm = float(self._state_value(state, "bpm", bpm))
+            phase = self._state_value(state, "beat_phase", None)
+            if bpm > 1e-6:
+                self.bpm = bpm
         period = 60.0 / max(1e-6, self.bpm)
         if phase is None:
             phase = ((timestamp - self._phase_anchor) / period) % 1.0
         return self.bpm, float(phase) % 1.0
 
+    def _apply_control_values(self, pose, state):
+        if state is None:
+            return dict(pose)
+        output = {axis: float(pose.get(axis, 50.0)) for axis in AXES}
+        energy = self._state_value(state, "energy", None)
+        stroke = self._state_value(state, "stroke_depth", None)
+        rotation = self._state_value(state, "rotation_mix", None)
+        complexity = self._state_value(state, "complexity", None)
+        density = self._state_value(state, "gesture_density", None)
+        safety = self._state_value(state, "safety_aggressiveness", None)
+
+        for axis in AXES:
+            scale = 1.0
+            if energy is not None:
+                scale *= float(np.clip(energy, 0.0, 1.75))
+            if axis == "L0" and stroke is not None:
+                scale *= float(np.clip(stroke, 0.0, 1.75))
+            if axis in ROTATION_AXES and rotation is not None:
+                scale *= float(np.clip(rotation, 0.0, 1.75))
+            if axis in SECONDARY_AXES and complexity is not None:
+                scale *= .70 + .60 * float(np.clip(complexity, 0.0, 1.0))
+            if axis in SECONDARY_AXES and density is not None:
+                scale *= .60 + .40 * float(np.clip(density, 0.0, 2.0))
+            if safety is not None:
+                scale *= .70 + .30 * float(np.clip(safety, 0.0, 1.0))
+            output[axis] = float(np.clip(50.0 + (output[axis] - 50.0) * scale, 0.0, 100.0))
+
+        smoothing = self._state_value(state, "smoothing", None)
+        if smoothing is not None and self._last_control_pose is not None:
+            amount = float(np.clip(smoothing, 0.0, .95))
+            for axis in AXES:
+                output[axis] = float(self._last_control_pose[axis] * amount + output[axis] * (1.0 - amount))
+        self._last_control_pose = dict(output)
+        return output
+
     def start(self):
         if self.worker is not None and self.worker.is_alive():
             return
         self.stop_event.clear()
+        self._last_control_pose = None
         source_started = False
         sink_opened = False
         try:
@@ -209,16 +261,17 @@ class LiveSession:
                         timestamp, block = self.source.read(.15)
                     except Empty:
                         continue
-                    bpm, phase = self._transport(timestamp)
+                    control = self._control_snapshot()
+                    bpm, phase = self._transport(timestamp, control)
                     frame = self.extractor.analyze(
                         block,
                         timestamp=timestamp,
                         bpm=bpm,
                         beat_phase=phase,
-                        confidence=.72 if self.control_state is not None else .55,
+                        confidence=.72 if control is not None else .55,
                     )
                     motion = self.engine.process(frame)
-                    output_pose = dict(motion.pose)
+                    output_pose = self._apply_control_values(motion.pose, control)
                     if self.pose_transform is not None:
                         output_pose = dict(self.pose_transform(output_pose))
                     if self.sink is not None:
