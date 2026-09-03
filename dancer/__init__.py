@@ -31,17 +31,17 @@ _install_tcode_runtime_safety()
 def main():
     from .runtime import prepare_runtime_path
     from .util import cli_args
-    from .cli_v28 import add_cli_arguments
+    from .cli_v30 import add_cli_arguments
 
     prepare_runtime_path()
     parser = add_cli_arguments(cli_args())
     args = parser.parse_args()
     if args.cli:
-        from .cli_v28 import cmd
+        from .cli_v30 import cmd
         return cmd(args)
 
     if args.multiaxis:
-        from .workstation_ui_v28_final import ux
+        from .workstation_ui_v30 import ux
         ux(args)
         return 0
 
