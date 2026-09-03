@@ -1,8 +1,9 @@
-"""Unified device digital twin for PythonDancer 2.8.
+"""Unified device digital twin for PythonDancer 3.0.
 
 The twin combines calibration, transport timing, SR6 geometry, optimizer limits,
-and mechanical safe-set projection into one portable profile. It never drives
-servo PWM directly; output remains TCode/Intiface.
+mechanical safe-set projection, dynamic load estimation and optional
+hardware-in-the-loop feedback into one portable profile. It never drives servo
+PWM directly; output remains TCode/Intiface.
 """
 from __future__ import annotations
 
@@ -11,11 +12,24 @@ import json
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from .calibration import DeviceCalibrationProfile, apply_calibration
+import numpy as np
+
+from .calibration import DeviceCalibrationProfile
+from .device_feedback import DeviceDynamicsProfile, FeedbackCalibration, simulate_dynamic_load
 from .kinematics import AXES, SR6Geometry
 from .latency import DeviceTimingProfile, compensate_plan_latency
 from .mechanical_safety import MechanicalProjectionConfig, project_plan_to_safe, project_pose_to_safe, trajectory_mechanical_risk
 from .optimizer import OptimizerConfig, optimize_multiaxis
+
+
+def _apply_feedback_latency(plan, latency_ms: float):
+    offset = max(0.0, float(latency_ms)) / 1000.0
+    if offset <= 1e-9:
+        return {axis: [(float(t), float(p)) for t, p in plan.get(axis, ())] for axis in AXES}
+    return {
+        axis: [(max(0.0, float(t) - offset), float(p)) for t, p in plan.get(axis, ())]
+        for axis in AXES
+    }
 
 
 @dataclass(frozen=True)
@@ -26,28 +40,33 @@ class DeviceTwinProfile:
     timing: DeviceTimingProfile = field(default_factory=DeviceTimingProfile)
     geometry: SR6Geometry = field(default_factory=SR6Geometry)
     mechanical: MechanicalProjectionConfig = field(default_factory=MechanicalProjectionConfig)
+    dynamics: DeviceDynamicsProfile = field(default_factory=DeviceDynamicsProfile)
+    feedback: FeedbackCalibration = field(default_factory=FeedbackCalibration)
     safe_mode: bool = True
     notes: str = ""
 
     def optimizer_config(self) -> OptimizerConfig:
+        derate = float(np.clip(self.dynamics.velocity_derate, .25, 1.25))
+        if self.safe_mode:
+            derate = min(derate, 1.0)
         return OptimizerConfig(
             enabled=True,
             neutral=50.0,
             pose_budget=1.65 if self.safe_mode else 1.95,
-            velocity_budget=1.95 if self.safe_mode else 2.35,
+            velocity_budget=(1.95 if self.safe_mode else 2.35) * derate,
             iterations=4 if self.safe_mode else 3,
-            max_speed={axis: item.max_speed for axis, item in self.calibration.axes.items()},
-            max_acceleration={axis: item.max_acceleration for axis, item in self.calibration.axes.items()},
-            max_jerk={axis: item.max_jerk for axis, item in self.calibration.axes.items()},
+            max_speed={axis: item.max_speed * derate for axis, item in self.calibration.axes.items()},
+            max_acceleration={axis: item.max_acceleration * derate for axis, item in self.calibration.axes.items()},
+            max_jerk={axis: item.max_jerk * derate for axis, item in self.calibration.axes.items()},
         )
 
     def safe_pose(self, pose: Mapping[str, float], *, calibrate: bool = False):
         canonical, risk, changed = project_pose_to_safe(pose, self.geometry, self.mechanical)
         if calibrate:
-            mapped = {
-                axis: self.calibration.axes[axis].map_normalized(float(canonical.get(axis, 50.0)))
-                for axis in AXES
-            }
+            mapped = {}
+            for axis in AXES:
+                command = self.feedback.correct_command(axis, float(canonical.get(axis, 50.0)))
+                mapped[axis] = self.calibration.axes[axis].map_normalized(command)
             return mapped, risk, changed
         return canonical, risk, changed
 
@@ -61,8 +80,17 @@ class DeviceTwinProfile:
 
     def output_plan(self, plan: Mapping[str, Sequence[tuple[float, float]]]):
         canonical, diagnostics = self.canonical_safe_plan(plan)
-        calibrated = apply_calibration(canonical, self.calibration)
+        calibrated = {}
+        for axis in AXES:
+            calibration = self.calibration.axes[axis]
+            calibrated[axis] = [
+                (float(at), calibration.map_normalized(self.feedback.correct_command(axis, float(pos))))
+                for at, pos in canonical.get(axis, ())
+            ]
         compensated = compensate_plan_latency(calibrated, self.timing)
+        compensated = _apply_feedback_latency(compensated, self.feedback.latency_ms if self.feedback.enabled else 0.0)
+        diagnostics["feedback"] = self.feedback.to_dict()
+        diagnostics["dynamic_load"] = simulate_dynamic_load(canonical, self.dynamics).to_dict()
         return compensated, diagnostics
 
     def diagnostics(self, plan: Mapping[str, Sequence[tuple[float, float]]]):
@@ -75,6 +103,9 @@ class DeviceTwinProfile:
             "timing": self.timing.to_dict(),
             "mechanical": risk,
             "projection": passes,
+            "dynamics": self.dynamics.to_dict(),
+            "dynamic_load": simulate_dynamic_load(canonical, self.dynamics).to_dict(),
+            "feedback": self.feedback.to_dict(),
         }
 
     def to_dict(self):
@@ -83,7 +114,7 @@ class DeviceTwinProfile:
             for name in self.geometry.__dataclass_fields__
         }
         return {
-            "version": "1.0",
+            "version": "2.0",
             "name": self.name,
             "device_type": self.device_type,
             "safe_mode": bool(self.safe_mode),
@@ -92,6 +123,8 @@ class DeviceTwinProfile:
             "timing": self.timing.to_dict(),
             "geometry": geometry,
             "mechanical": self.mechanical.to_dict(),
+            "dynamics": self.dynamics.to_dict(),
+            "feedback": self.feedback.to_dict(),
         }
 
     @classmethod
@@ -115,6 +148,8 @@ class DeviceTwinProfile:
             timing=DeviceTimingProfile.from_dict(payload.get("timing", {})),
             geometry=geometry,
             mechanical=mechanical,
+            dynamics=DeviceDynamicsProfile.from_dict(payload.get("dynamics")),
+            feedback=FeedbackCalibration.from_dict(payload.get("feedback")),
             safe_mode=bool(payload.get("safe_mode", True)),
             notes=str(payload.get("notes", "")),
         )
