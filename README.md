@@ -1,258 +1,330 @@
-# PythonDancer 2.7
+# PythonDancer 3.0
 
-PythonDancer turns audio/video soundtracks into editable six-axis choreography for `L0/L1/L2/R0/R1/R2`, exports MultiFunPlayer-compatible Funscript bundles/TCode, and streams live motion through serial TCode or Intiface Central / Buttplug.
+PythonDancer turns audio/video into editable six-axis choreography for `L0/L1/L2/R0/R1/R2`, exports MultiFunPlayer-compatible Funscript bundles/TCode, and supports serial TCode, Intiface Central / Buttplug and predictive Live Choreography.
 
-**2.7 — Quality Intelligence** adds scored multi-candidate generation, A/B preview, automatic weak-range improvement, per-section Motion Intent and SR6 mechanical-risk projection on top of the 2.6 generation-quality engine and the 2.5 editing/safety workstation.
+**3.0 — Intelligent Choreography** adds a semantic intelligence layer above the validated 2.8 DAW: natural-language Copilot editing, Motion Grammar, local preference learning, section-level reference retrieval, Plugin SDK, MIDI/OSC/Link-style control surfaces, Device Twin 2.0 feedback/dynamics, project versioning, batch workflows and portable Motion Packs.
 
-The desktop workstation supports runtime **简体中文 / English** switching. Internal motion/protocol tokens are never translated.
+The desktop workstation supports runtime **简体中文 / English** switching. Internal axis/protocol tokens are never translated.
 
 > Upstream: `NodudeWasTaken/PythonDancer`, itself a Python port of `ncdxncdx/FunscriptDancer`.
 
-## Architecture
+## Safety architecture
+
+3.0 intelligence is deliberately **not** allowed to send arbitrary hardware commands. Copilot, Motion Grammar, retrieval and plugins produce canonical choreography or deterministic editing operations. Physical output still flows through the existing optimizer, mechanical projection and Device Twin safety chain.
 
 ```text
 Audio / video
     ↓
-Mixed features + optional stems
-    ↓
-Beat / bar / phrase / section analysis
+Beat / bar / phrase / section + optional stems
     ↓
 Continuous Motion Intent
-    + section-level overrides
     ↓
-Reference Style
+Reference Style / Section Retrieval
+    ↓
+Copilot → deterministic operations
+Motion Grammar → semantic motion program
+Preference Model → personalized QualityWeights
     ↓
 Independent six-axis planners
-    ↓
 Gesture Timeline
+DAW Automation + Style Morphing
+Candidate Composer
     ↓
-6D pose / velocity / acceleration / jerk optimizer
+6D optimizer
+SR6 mechanical projection
+Device Twin 2.0
+  geometry · calibration · timing
+  velocity · acceleration · jerk
+  telemetry gain/bias/latency
+  dynamic/thermal load model
     ↓
-SR6 mechanical risk + nearest-safe-pose projection
+Effective-output Quality Intelligence
     ↓
-Motion Quality Scorer
- rhythm · phrase · smoothness · diversity
- coherence · repetition · safety · jerk · stems
-    ↓
-Multi-Candidate / A-B / Best-section Merge
-    ↓
-Auto Improvement of weak ranges
-    ↓
-2.5 keyframe / curve / safety editing
-    ↓
-Calibration + latency compensation
-    ↓
-Funscript / TCode / Intiface
+Funscript / TCode / Intiface / Live
 ```
 
-## Quality Intelligence
+Firmware remains authoritative for real device PWM/servo control, emergency stops and hardware-specific safety.
 
-Every plan can be scored from 0–100 on nine dimensions:
+## Choreography Copilot
 
-- Rhythm alignment
-- Phrase alignment
-- Smoothness
-- Axis diversity
-- Cross-axis coherence
-- Repetition
-- Mechanical safety
-- Jerk comfort
-- Stem responsiveness
+Copilot accepts Chinese or English editing instructions and compiles them into explicit DAW/Motion Grammar operations instead of raw keyframes or device commands.
 
-The scorer also identifies the weakest timeline windows.
-
-```bash
-python -m dancer song.mp3 --cli --yes --multiaxis --quality-score
-```
-
-Write the complete report:
-
-```bash
---quality-report quality.json
-```
-
-### Multi-candidate generation
-
-Generate and rank 2–8 materially different plans:
-
-```bash
---quality-candidates 6
-```
-
-Built-in candidate characters include Balanced, Expressive, Rhythm Heavy, Smooth Flow, Rotation Heavy, Deep Translation, Accent Dense and Experimental. Candidate generation varies preset, gesture strength, independent-axis density, accent threshold, optimizer budgets and Motion Intent bias.
-
-Use `--keep-base-candidate` to rank alternatives without automatically adopting the winner.
-
-### A/B preview
-
-The GUI provides Candidate A/B selectors with:
-
-- Preview A / Preview B — non-destructive curve + 3D pose preview;
-- score and strongest metric delta;
-- Use A / Use B only when the user confirms the choice;
-- Reset preview to return to the current editable plan.
-
-### Best-section merge
-
-Each candidate is rescored inside every detected or manually edited Section. PythonDancer can splice the locally best candidate for Intro/Verse/Build/Chorus/Drop/Breakdown/Outro with crossfaded boundaries.
-
-```bash
---quality-candidates 6 --merge-best-sections
-```
-
-### Auto Improvement
-
-The automatic improvement loop:
+Examples:
 
 ```text
-score → weakest range → try candidate replacements
-      → re-score whole track → accept only a real gain → repeat
+副歌更激进一点，锁住 L0，R1 少一点，加 wave
+Drop more aggressive, keep L0, reduce R1 and add a spiral
+Breakdown smoother and safer
 ```
+
+CLI:
 
 ```bash
---auto-improve \
---improve-iterations 4 \
---improve-target 90 \
---improve-min-gain 0.35
+python -m dancer song.mp3 --cli --multiaxis --yes \
+  --copilot "副歌更激进一点，锁住 L0，加 wave"
 ```
 
-Locked axes are preserved. A replacement that lowers the score is never accepted.
+The desktop **Intelligence** workspace exposes the same operation compiler.
 
-## Section-level Motion Intent
+## Motion Grammar / Motion Compiler
 
-Each musical section may independently override:
+Semantic primitives currently include:
 
 ```text
-intensity
-aggression
-flow
-complexity
-symmetry
-rotation_bias
-translation_bias
-accent_density
+hold · drift · pulse · wave · spiral · orbit
+rock · sweep · twist · accent · recoil
 ```
 
-Overrides have an amount and edge blend. If section boundaries move in the timeline editor, their Intent ranges move with them.
+A Motion Program is a portable deterministic description of high-level choreography:
 
-The GUI can **Apply section intent**, **Regenerate section**, or **Clear section intent**. CLI can load JSON:
+```json
+{
+  "name": "drop-program",
+  "blend": 0.45,
+  "primitives": [
+    {"kind": "spiral", "start": 32, "end": 40, "amount": 0.9, "cycles": 4},
+    {"kind": "accent", "start": 40, "end": 44, "amount": 1.1, "cycles": 8}
+  ]
+}
+```
 
 ```bash
---section-intents section-intents.json
+--motion-program program.json --motion-blend 0.45
 ```
 
-## Mechanical risk and nearest-safe projection
+The compiler outputs canonical 0–100 six-axis motion. Device constraints are applied afterwards.
 
-The SR6 firmware-model solver now estimates:
+## Preference Learning / personalized Quality Intelligence
 
-- reachability;
-- maximum servo angle;
-- servo safety margin;
-- finite-difference linkage sensitivity;
-- singularity risk;
-- mean / peak trajectory risk;
-- unsafe and singularity ratios;
-- first unsafe timestamp.
+Explicit Candidate A/B choices can update a local `PreferenceModel`. The model adapts the existing Quality Intelligence metric weights rather than replacing the scorer.
 
-When a requested pose exceeds the configured risk envelope, PythonDancer finds a close safe pose by radial search toward neutral plus coordinate refinement. The projected trajectory is then passed through speed/acceleration/jerk constraints and mechanically checked again.
+Quality dimensions remain:
+
+- rhythm alignment;
+- phrase alignment;
+- smoothness;
+- axis diversity;
+- cross-axis coherence;
+- repetition;
+- mechanical safety;
+- jerk comfort;
+- stem responsiveness.
+
+The profile is local, deterministic and JSON-serializable:
 
 ```bash
---mechanical-projection \
---mechanical-max-risk 0.82 \
---servo-limit-deg 88 \
---singularity-sensitivity 2.5
+--preference-profile my-preferences.json
+--save-preference-profile my-preferences.json
 ```
 
-For A/B analysis:
+The GUI provides **Prefer A / Prefer B** controls and automatically re-ranks candidates using the learned weights.
 
-```bash
---no-mechanical-projection
-```
+## Section Reference Retrieval
 
-This is a planning/diagnostic safety layer. The TCode device firmware still owns real servo/PWM calibration and control.
-
-## Generation Quality retained from 2.6
-
-PythonDancer keeps:
-
-- independent L1/L2/R0/R1/R2 event clocks;
-- optional Demucs/provided stems;
-- drums/kick/snare/hi-hat, bass, vocal and other stem features;
-- continuous 8D Motion Intent;
-- manual Intent blending;
-- multi-reference style learning and clustering;
-- advanced Gesture Timeline blocks;
-- simultaneous 6D pose/velocity budgets;
-- per-axis speed, acceleration and jerk constraints;
-- SR6 geometry/reachability diagnostics;
-- device calibration limits feeding the optimizer;
-- latency/manual-offset compensation.
-
-Secondary-axis musical mapping:
+`ReferenceSectionIndex` stores compact music/motion descriptors:
 
 ```text
-L0 stroke   primary beat/subdivision planner
-L1 surge    bass energy
-L2 sway     hi-hat/high-frequency activity
-R0 twist    vocal pitch motion
-R1 roll     snare/drum accents
-R2 pitch    vocal/harmonic energy
+BPM · energy · bass · vocal · high-frequency activity
+duration · rotation · translation · complexity
 ```
 
-## Editing & device layer retained from 2.5
+The current section can retrieve nearby reference motion, adapt its duration/amplitude and splice it into the editable plan while respecting locked axes.
 
-- direct keyframe add/drag/delete;
-- Beat Snap / Quantize;
-- Linear / Smoothstep / PCHIP / Makima interpolation;
-- Motion/Risk Heatmaps;
-- Smart cross-axis limits;
-- music-aware gap filling;
-- Axis Link gain/delay/smoothing/position-or-velocity/only-if-empty;
+```bash
+--reference-index references.json \
+--reference-query '{"bpm":138,"energy":0.9,"bass":0.85,"duration":8}' \
+--reference-top-k 5 \
+--reference-amount 0.35
+```
+
+## Plugin SDK
+
+PythonDancer discovers third-party entry points under:
+
+```text
+pythondancer.plugins
+```
+
+Supported plugin kinds:
+
+```text
+gesture
+quality_metric
+device
+exporter
+analyzer
+planner
+copilot_backend
+control_surface
+```
+
+Plugin discovery is isolated: one broken plugin does not prevent PythonDancer from launching.
+
+```bash
+--discover-plugins
+```
+
+## MIDI / OSC / Link-style transport
+
+Optional control dependencies:
+
+```bash
+pip install -e '.[control]'
+```
+
+Control mappings can target DAW/Live parameters through MIDI CC/notes or OSC paths. Live Choreography can sample an external BPM/beat-phase provider every audio block.
+
+```bash
+--control-map controls.json
+--midi-input "My MIDI Device"
+--osc-port 9000
+--ableton-link
+```
+
+`LinkClock` provides the shared transport interface and deterministic fallback. Availability of a real network Link backend depends on an installed compatible Python binding.
+
+## Device Twin 2.0
+
+The Device Twin now combines:
+
+- SR6 geometry;
+- axis calibration;
+- transport latency/jitter;
+- velocity / acceleration / jerk limits;
+- mechanical risk policy;
+- optional telemetry-derived command gain/bias;
+- estimated response latency and RMS tracking error;
+- conservative dynamic-load / reversal / thermal estimates.
+
+Telemetry format:
+
+```json
+{
+  "samples": [
+    {
+      "timestamp": 0.0,
+      "commanded": {"L0": 50, "L1": 50, "L2": 50, "R0": 50, "R1": 50, "R2": 50},
+      "actual": {"L0": 49.8, "L1": 50.1, "L2": 50, "R0": 50, "R1": 50, "R2": 50}
+    }
+  ]
+}
+```
+
+```bash
+--device-twin device.json \
+--telemetry-log telemetry.json \
+--write-adaptive-twin adaptive-device.json
+```
+
+Feedback compensation is opt-in. It does not replace firmware calibration or emergency safety.
+
+## Project Versions
+
+`ProjectVersionGraph` provides lightweight choreography version control inside the application:
+
+```text
+main
+ ├─ base
+ ├─ smoother-verse
+ └─ aggressive-drop
+```
+
+Supported operations:
+
+- content-addressed snapshots;
+- named branches;
+- checkout;
+- history;
+- section-level merge between versions.
+
+Version graph state can be persisted inside `.pdance` and exported through CLI:
+
+```bash
+--version-graph-out versions.json --version-message "stronger chorus"
+```
+
+## Motion Packs
+
+Portable `.pdmotion` packs are ZIP containers with a JSON manifest and can include:
+
+- Motion Programs;
+- Automation presets;
+- Style Morph timelines;
+- Device Twins;
+- Preference profiles;
+- plugin configuration.
+
+CLI:
+
+```bash
+--motion-pack creator-pack.pdmotion
+--motion-program-name spiral-drop
+--preference-name personal
+--device-twin-name My-SR6
+```
+
+Export the active session assets:
+
+```bash
+--export-motion-pack my-pack.pdmotion
+```
+
+## Batch Queue
+
+Batch manifests describe multiple media jobs and per-job options:
+
+```json
+{
+  "workers": 2,
+  "jobs": [
+    {"identifier":"track-a","media_path":"a.mp3","output_path":"out/a","options":{"copilot_instruction":"drop wave"}},
+    {"identifier":"track-b","media_path":"b.mp3","output_path":"out/b","options":{"quality_candidates":6}}
+  ]
+}
+```
+
+```bash
+--batch-manifest jobs.json --batch-workers 2
+```
+
+The desktop Batch Queue executes jobs in isolated subprocesses so one job cannot mutate another project's runtime state.
+
+## 2.8 DAW retained
+
+3.0 retains all validated 2.8 functionality:
+
+- DAW Automation Lanes;
+- Style Morphing;
+- Candidate Composer with exact section-level effective-output scoring;
+- waveform / beat grid;
+- Gesture Timeline;
 - Solo / Mute / Lock;
 - local regeneration;
-- Soft Start and optional Auto Home;
-- `.pdance` project, autosave, recent projects and Undo/Redo;
-- serial TCode v0.3 and D0/D1/D2;
-- speed-aware TCode `I<ms>`;
-- exception-safe `DSTOP`;
-- Intiface Central / Buttplug v4.
+- Quality Intelligence / A-B / Auto Improvement;
+- predictive Live Choreography;
+- Device profiles and calibration;
+- serial TCode and Intiface playback;
+- bilingual GUI;
+- Windows/macOS packaging.
 
-## `.pdance` schema 3
+When the 3.0 intelligence layer is unused, the existing 2.8 editing/output chain remains the baseline behavior.
 
-2.7 projects persist the complete editable workspace plus Quality Intelligence state:
+## `.pdance` schema 5
 
-- last QualityReport;
-- candidate plans and scores;
-- A/B selection;
-- section-level Intent;
-- mechanical-projection settings;
-- Auto Improvement parameters/history;
-- language, SR6 geometry, calibration, Gesture/Curve/Safety/Device settings.
+Schema 5 stores the complete editable project plus 3.0 intelligence state:
 
-Schema 1 and 2 projects remain readable.
+- Copilot instruction/state;
+- Preference Model;
+- Motion Program;
+- Reference index state;
+- Project Version Graph;
+- Device Twin 2.0 feedback/dynamics;
+- existing Automation, Style Morph, Candidate Composer and Live settings;
+- Quality Intelligence, generation, workspace, curves, safety and device state.
 
-## Bilingual workstation / 中英双语 GUI
+Schemas **1 / 2 / 3 / 4 remain readable**.
 
-Run:
-
-```bash
-python -m dancer scene.mp4 --multiaxis
-```
-
-The Language menu switches at runtime:
-
-```text
-简体中文
-English
-```
-
-Quality Intelligence, candidates, A/B preview, automatic improvement, Section Intent, mechanical risk, existing editing/device controls, status text and dialogs are localized. Engine tokens such as `balanced`, `forward`, `L0` and protocol data stay unchanged.
-
-CJK rendering uses installed system fonts; PythonDancer does not bundle font files.
-
-Detailed Chinese guide: `docs/PythonDancer-2.7-ZH-CN.md`.
-
-## CLI examples
+## CLI quick start
 
 Default six-axis generation:
 
@@ -260,96 +332,51 @@ Default six-axis generation:
 python -m dancer song.mp3 --cli --yes --multiaxis
 ```
 
-Generate six candidates, merge the best sections and auto-improve:
+Open desktop workstation:
+
+```bash
+python -m dancer song.mp3 --multiaxis
+```
+
+Copilot + candidates + personalized scoring:
 
 ```bash
 python -m dancer song.mp3 --cli --yes --multiaxis \
-  --stems auto \
+  --copilot "drop more aggressive with spiral" \
   --quality-candidates 6 \
-  --merge-best-sections \
-  --auto-improve \
-  --quality-report song-quality.json
+  --preference-profile preferences.json
 ```
 
-Live serial playback with calibration/latency:
+Predictive Live mode:
 
 ```bash
-python -m dancer song.mp3 --cli --yes --multiaxis \
-  --serial_port /dev/ttyUSB0 \
-  --calibration_profile my-sr6.json \
-  --latency_ms 30 \
-  --measure_latency
+python -m dancer --cli --multiaxis --live --live-bpm 128
 ```
 
-Intiface:
+Use `python -m dancer --help` for the complete CLI surface.
+
+## Optional dependencies
 
 ```bash
-python -m dancer song.mp3 --cli --yes --multiaxis \
-  --intiface --intiface_address ws://127.0.0.1:12345
-```
-
-## Install
-
-Python 3.10+:
-
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -e .
-```
-
-Intiface source install:
-
-```bash
+# Intiface / Buttplug
 pip install -e '.[intiface]'
+
+# Live audio
+pip install -e '.[live]'
+
+# MIDI / OSC controls
+pip install -e '.[control]'
+
+# Development / tests / packaging
+pip install -e '.[test,build,intiface,live,control]'
 ```
 
-Development/tests:
+## Release packaging
 
-```bash
-pip install -e '.[test,intiface]'
-python -m pytest
-```
+Release targets:
 
-Desktop release builds install Intiface support automatically. FFmpeg is bundled in macOS packages. Demucs remains optional/external.
+- Windows x86_64;
+- macOS arm64;
+- macOS Intel x86_64.
 
-## Output bundle
-
-```text
-scene.funscript        L0 stroke
-scene.surge.funscript  L1 surge
-scene.sway.funscript   L2 sway
-scene.twist.funscript  R0 twist
-scene.roll.funscript   R1 roll
-scene.pitch.funscript  R2 pitch
-scene.motion.json      manifest / metadata
-```
-
-The 2.7 motion manifest is version **1.5**. Normalized Funscript motion remains 0–100; device-specific ranges stay in calibration/live-output policy unless saved as project metadata.
-
-## macOS
-
-Native packages target:
-
-```text
-macOS arm64
-macOS Intel x86_64
-```
-
-Builds are ad-hoc signed but not Apple-notarized. First launch may require Control-click/right-click → **Open**.
-
-## Validation gate
-
-A release candidate is considered validated only after the same final commit passes:
-
-```text
-Python 3.10 tests
-Python 3.12 tests
-Python 3.13 tests
-Windows PyInstaller build + artifact
-macOS arm64 app/ZIP/DMG + artifact
-macOS Intel x86_64 app/ZIP/DMG + artifact
-```
-
-A workflow artifact is not the same thing as a published GitHub Release.
+macOS packages are ad-hoc signed, not Apple-notarized. Live audio may require microphone/input permission. OSC/Link-style local networking may require local-network permission.
