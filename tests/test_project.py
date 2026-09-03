@@ -20,10 +20,11 @@ def test_pdance_round_trip(tmp_path):
         safety_settings={"profile": "safe"},
         quality_intelligence={"report": {"overall": 91.2}, "candidate_a": "Balanced"},
         daw={"automation": {"version": "1.0"}, "live": {"bpm": 128.0}},
+        intelligence={"version": "3.0", "copilot_instruction": "drop 加一个 wave"},
     )
     path = save_project(tmp_path / "demo.pdance", project)
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema"] == 4
+    assert payload["schema"] == 5
     restored = load_project(path)
     assert restored.media_path == "song.mp3"
     assert restored.base_plan["L0"] == [(0.0, 20.0), (1.0, 80.0)]
@@ -38,6 +39,7 @@ def test_pdance_round_trip(tmp_path):
     assert restored.curve_settings["interpolation"] == "pchip"
     assert restored.quality_intelligence["report"]["overall"] == 91.2
     assert restored.daw["live"]["bpm"] == 128.0
+    assert restored.intelligence["copilot_instruction"] == "drop 加一个 wave"
 
 
 def test_autosaves_do_not_enter_recents_and_same_stem_does_not_collide(tmp_path, monkeypatch):
@@ -94,6 +96,7 @@ def test_schema_1_project_still_loads(tmp_path):
     assert restored.workspace.gestures[0].cycles == 1.0
     assert restored.workspace.gestures[0].direction == 1
     assert restored.daw == {}
+    assert restored.intelligence == {}
 
 
 def test_schema_2_project_still_loads(tmp_path):
@@ -110,6 +113,7 @@ def test_schema_2_project_still_loads(tmp_path):
     assert restored.generation["version"] == "2.6"
     assert restored.quality_intelligence == {}
     assert restored.daw == {}
+    assert restored.intelligence == {}
 
 
 def test_schema_3_project_still_loads_with_empty_daw(tmp_path):
@@ -125,6 +129,21 @@ def test_schema_3_project_still_loads_with_empty_daw(tmp_path):
     assert restored.media_path == "v27.mp3"
     assert restored.quality_intelligence["report"]["overall"] == 88.0
     assert restored.daw == {}
+    assert restored.intelligence == {}
+
+
+def test_schema_4_project_still_loads_with_empty_intelligence(tmp_path):
+    path = tmp_path / "v28.pdance"
+    path.write_text(json.dumps({
+        "schema": 4,
+        "media_path": "v28.mp3",
+        "base_plan": {axis: [] for axis in ("L0", "L1", "L2", "R0", "R1", "R2")},
+        "workspace": {"duration": 0, "selection": {}, "sections": [], "gestures": [], "axes": {}, "solo_axis": None},
+        "daw": {"live": {"bpm": 126.0}},
+    }), encoding="utf-8")
+    restored = load_project(path)
+    assert restored.daw["live"]["bpm"] == 126.0
+    assert restored.intelligence == {}
 
 
 def test_undo_redo_restores_plan_and_workspace():
