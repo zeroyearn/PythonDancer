@@ -83,21 +83,37 @@ def test_windows_desktop_entry_preserves_explicit_arguments(monkeypatch):
     assert calls == [("PythonDancer.exe", "--cli", "song.mp3")]
 
 
-def test_release_workflow_is_explicit_and_targets_28():
+def test_release_workflow_is_explicit_and_targets_30():
     text = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert 'default: "v2.8.0"' in text
-    assert 'else TAG="v2.8.0"' in text
+    assert 'default: "v3.0.0"' in text
+    assert 'else TAG="v3.0.0"' in text
     assert 'branches:' not in text
     assert 'tags: ["v*"]' in text
-    assert "PythonDancer 2.8.0 — AI Choreography DAW" in text
+    assert "PythonDancer 3.0.0 — Intelligent Choreography" in text
     assert "live-prediction-ms" in text
-    assert ".[build,test,intiface,live]" in text
+    assert "copilot" in text
+    assert "motion-program" in text
+    assert "reference-index" in text
+    assert ".[build,test,intiface,live,control]" in text
 
 
-def test_windows_bundle_is_gui_only_and_freezes_28_runtime():
+def test_windows_bundle_is_gui_only_and_freezes_30_runtime():
     text = Path("qt.spec").read_text(encoding="utf-8")
     assert "console=False" in text
     assert '"dancer.plan_window"' in text
-    assert '"dancer.cli_v28"' in text
-    assert '"dancer.workstation_ui_v28_final"' in text
+    assert '"dancer.cli_v30"' in text
+    assert '"dancer.workstation_ui_v30"' in text
+    assert '"dancer.motion_grammar"' in text
+    assert '"dancer.preferences"' in text
+    assert '"dancer.reference_retrieval"' in text
+    assert '"dancer.device_feedback"' in text
     assert '"sounddevice"' in text
+
+
+def test_package_version_is_30_and_runtime_entry_uses_30():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    entry = Path("dancer/__init__.py").read_text(encoding="utf-8")
+    assert 'version = "3.0.0"' in pyproject
+    assert 'from .cli_v30 import add_cli_arguments' in entry
+    assert 'from .cli_v30 import cmd' in entry
+    assert 'from .workstation_ui_v30 import ux' in entry
