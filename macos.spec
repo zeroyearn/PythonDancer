@@ -14,6 +14,8 @@ hiddenimports = sorted(set(
     collect_submodules("librosa")
     + collect_submodules("buttplug")
     + collect_submodules("sounddevice")
+    + collect_submodules("mido")
+    + collect_submodules("pythonosc")
     + [
         "matplotlib.backends.backend_tkagg",
         "mpl_toolkits.mplot3d",
@@ -26,6 +28,7 @@ hiddenimports = sorted(set(
         "dancer.cli_v26_release",
         "dancer.cli_v27",
         "dancer.cli_v28",
+        "dancer.cli_v30",
         "dancer.ui",
         "dancer.multiaxis_ui",
         "dancer.choreography",
@@ -46,6 +49,7 @@ hiddenimports = sorted(set(
         "dancer.workstation_ui_v27_async",
         "dancer.workstation_ui_v28",
         "dancer.workstation_ui_v28_final",
+        "dancer.workstation_ui_v30",
         "dancer.editing",
         "dancer.safety",
         "dancer.project",
@@ -54,6 +58,7 @@ hiddenimports = sorted(set(
         "dancer.independent_planner",
         "dancer.optimizer",
         "dancer.reference_library",
+        "dancer.reference_retrieval",
         "dancer.latency",
         "dancer.calibration",
         "dancer.generation_limits",
@@ -63,6 +68,7 @@ hiddenimports = sorted(set(
         "dancer.i18n_safe",
         "dancer.i18n_v27",
         "dancer.i18n_v28",
+        "dancer.i18n_v30",
         "dancer.section_intent",
         "dancer.mechanical_safety",
         "dancer.quality",
@@ -74,8 +80,18 @@ hiddenimports = sorted(set(
         "dancer.daw_transform",
         "dancer.candidate_composer",
         "dancer.device_twin",
+        "dancer.device_feedback",
         "dancer.live",
         "dancer.live_io",
+        "dancer.motion_grammar",
+        "dancer.copilot",
+        "dancer.preferences",
+        "dancer.plugin_api",
+        "dancer.control_surface",
+        "dancer.intelligence_runtime",
+        "dancer.versioning",
+        "dancer.batch_queue",
+        "dancer.motion_pack",
     ]
 ))
 
@@ -122,11 +138,12 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "PythonDancer",
         "CFBundleName": "PythonDancer",
-        "CFBundleShortVersionString": "2.8.0",
-        "CFBundleVersion": "2.8.0",
+        "CFBundleShortVersionString": "3.0.0",
+        "CFBundleVersion": "3.0.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "NSMicrophoneUsageDescription": "PythonDancer Live Choreography uses audio input only when you start Live mode.",
+        "NSLocalNetworkUsageDescription": "PythonDancer may use the local network for OSC, Link and Intiface control when you enable those features.",
         "NSHumanReadableCopyright": "PythonDancer contributors",
     },
 )
