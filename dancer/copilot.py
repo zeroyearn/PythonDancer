@@ -32,7 +32,7 @@ STYLE_ALIASES = {
     "expressive": ("expressive", "表现力", "丰富", "更有表现"),
     "aggressive": ("aggressive", "hard", "harder", "激进", "猛烈", "更猛", "更强烈"),
     "rotation": ("rotation", "rotational", "旋转", "转动"),
-    "minimal": ("minimal", "simple", "极简", "简洁", "少一点", "克制"),
+    "minimal": ("minimal", "simple", "极简", "简洁", "克制"),
 }
 
 SECTION_ALIASES = {
@@ -147,6 +147,27 @@ def _intensity_multiplier(text: str) -> float:
     return value
 
 
+def _axis_lock_requested(text: str, token: str) -> bool:
+    patterns = (
+        rf"\b(lock|keep|preserve)\s*{token}\b",
+        rf"\b{token}\s*(lock|locked|keep|preserve)\b",
+        rf"(锁住|锁定|保持|保留)\s*{token}\b",
+        rf"\b{token}\s*(锁住|锁定|保持|保留)",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _axis_density_request(text: str, token: str) -> float | None:
+    less = r"less|reduce|lower|降低|减少|少一点|弱一点|不要太频繁|别太频繁"
+    more = r"more|increase|higher|增加|加强|更频繁|多一点"
+    separator = r"[^,，。;；]{0,16}"
+    if re.search(rf"\b{token}\b{separator}({less})", text) or re.search(rf"({less}){separator}\b{token}\b", text):
+        return .72
+    if re.search(rf"\b{token}\b{separator}({more})", text) or re.search(rf"({more}){separator}\b{token}\b", text):
+        return 1.25
+    return None
+
+
 def compile_instruction(
     instruction: str,
     *,
@@ -197,15 +218,13 @@ def compile_instruction(
     density: dict[str, float] = {}
     for axis in AXIS_ORDER:
         token = axis.lower()
-        if re.search(rf"\b(lock|keep|preserve)\s*{token}\b", text) or re.search(rf"\b{token}\s*(lock|locked)\b", text) or f"锁住{token}" in text or f"保持{token}" in text:
+        if _axis_lock_requested(text, token):
             axis_locks.append(axis)
-        if (token in text and _contains_any(text, ("less", "reduce", "降低", "减少", "不要太频繁"))):
-            density[axis] = .72
-        elif token in text and _contains_any(text, ("more", "increase", "加强", "增加", "更频繁")):
-            density[axis] = 1.25
+        requested_density = _axis_density_request(text, token)
+        if requested_density is not None:
+            density[axis] = requested_density
 
     if not operations and not primitives and not axis_locks and not density:
-        # A generic instruction still becomes a conservative expressive edit.
         start, end, _ = ranges[0]
         operations.append(ChoreographyOperation("automation", "energy", multiplier, start, end))
         operations.append(ChoreographyOperation("style", "expressive", .55, start, end))
