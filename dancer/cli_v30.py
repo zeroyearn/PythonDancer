@@ -1,16 +1,17 @@
 """PythonDancer 3.0 Intelligent Choreography CLI integration."""
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from typing import Mapping
 
 from . import candidates as candidates_module
 from . import cli_v26, cli_v28
-from .batch_queue import BatchQueue, load_batch_manifest
+from .batch_queue import load_batch_manifest
 from .control_surface import ControlState, LinkClock, MidiControlBridge, OSCControlBridge, mappings_from_dict
 from .copilot import compile_instruction
 from .device_feedback import TelemetrySample, estimate_feedback
@@ -130,7 +131,6 @@ def _prepare_controls(args):
     if args.midi_input is not None:
         midi = MidiControlBridge(mappings, input_name=args.midi_input or None, on_change=on_change).open()
         resources.append(midi)
-    osc = None
     if args.osc_port:
         osc = OSCControlBridge(mappings, port=args.osc_port, on_change=on_change).start()
         resources.append(osc)
@@ -274,22 +274,38 @@ def _run_single(args):
     return status
 
 
+def _job_cli_arguments(job):
+    """Convert one batch job into a fresh Python process command.
+
+    Process isolation is intentional: the 3.0 CLI temporarily wraps validated
+    2.8 module functions while a render is active. Running multiple jobs in the
+    same interpreter would make those wrappers race with each other.
+    """
+    command = [sys.executable, "-m", "dancer", job.media_path, "--cli", "--multiaxis", "--yes"]
+    if job.output_path:
+        command.extend(["--out_path", job.output_path])
+    for key, value in dict(job.options or {}).items():
+        flag = "--" + str(key).replace("_", "-")
+        if isinstance(value, bool):
+            if value:
+                command.append(flag)
+        elif value is not None:
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False)
+            command.extend([flag, str(value)])
+    return command
+
+
 def _run_batch(args):
     queue = load_batch_manifest(args.batch_manifest)
     queue.workers = max(1, int(args.batch_workers))
 
     def worker(job):
-        child = deepcopy(args)
-        child.batch_manifest = None
-        child.audio_path = job.media_path
-        child.out_path = job.output_path or getattr(child, "out_path", None)
-        for key, value in job.options.items():
-            if hasattr(child, key):
-                setattr(child, key, value)
-        status = _run_single(child)
-        if status:
-            raise RuntimeError(f"job exited with status {status}")
-        return child.out_path or job.media_path
+        run = subprocess.run(_job_cli_arguments(job), capture_output=True, text=True)
+        if run.returncode:
+            detail = (run.stderr or run.stdout or "batch job failed").strip()
+            raise RuntimeError(detail[-1200:])
+        return job.output_path or job.media_path
 
     results = queue.run(worker, on_result=lambda item: print(f"Batch {item.identifier}: {'ok' if item.success else item.error}"))
     return 0 if results and all(item.success for item in results) else (0 if not results else 2)
