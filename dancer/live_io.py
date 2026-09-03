@@ -1,4 +1,4 @@
-"""Optional live audio capture and low-latency TCode sink for PythonDancer 2.8."""
+"""Optional live audio capture and low-latency TCode sink for PythonDancer 3.0."""
 from __future__ import annotations
 
 from queue import Empty, Queue
@@ -126,7 +126,12 @@ class TCodeLiveSink:
 
 
 class LiveSession:
-    """Background live audio -> features -> planner -> optional hardware sink."""
+    """Background live audio -> features -> planner -> optional hardware sink.
+
+    ``control_state`` may return an object/dict containing ``bpm`` and
+    ``beat_phase`` (for MIDI/OSC/Link transport). The callback is sampled once
+    per audio block, allowing tempo/phase changes without restarting Live mode.
+    """
 
     def __init__(
         self,
@@ -137,6 +142,7 @@ class LiveSession:
         on_motion: Callable | None = None,
         pose_transform: Callable | None = None,
         bpm: float = 120.0,
+        control_state: Callable | None = None,
     ):
         self.source = source
         self.engine = engine
@@ -144,10 +150,32 @@ class LiveSession:
         self.on_motion = on_motion
         self.pose_transform = pose_transform
         self.bpm = float(bpm)
+        self.control_state = control_state
         self.stop_event = Event()
         self.worker: Thread | None = None
         self.extractor = StreamingAudioFeatures(source.samplerate)
         self._phase_anchor = monotonic()
+
+    def _transport(self, timestamp: float):
+        bpm = self.bpm
+        phase = None
+        if self.control_state is not None:
+            try:
+                state = self.control_state()
+                if isinstance(state, dict):
+                    bpm = float(state.get("bpm", bpm))
+                    phase = state.get("beat_phase")
+                else:
+                    bpm = float(getattr(state, "bpm", bpm))
+                    phase = getattr(state, "beat_phase", None)
+                if bpm > 1e-6:
+                    self.bpm = bpm
+            except Exception:
+                phase = None
+        period = 60.0 / max(1e-6, self.bpm)
+        if phase is None:
+            phase = ((timestamp - self._phase_anchor) / period) % 1.0
+        return self.bpm, float(phase) % 1.0
 
     def start(self):
         if self.worker is not None and self.worker.is_alive():
@@ -181,14 +209,13 @@ class LiveSession:
                         timestamp, block = self.source.read(.15)
                     except Empty:
                         continue
-                    period = 60.0 / max(1e-6, self.bpm)
-                    phase = ((timestamp - self._phase_anchor) / period) % 1.0
+                    bpm, phase = self._transport(timestamp)
                     frame = self.extractor.analyze(
                         block,
                         timestamp=timestamp,
-                        bpm=self.bpm,
+                        bpm=bpm,
                         beat_phase=phase,
-                        confidence=.55,
+                        confidence=.72 if self.control_state is not None else .55,
                     )
                     motion = self.engine.process(frame)
                     output_pose = dict(motion.pose)
